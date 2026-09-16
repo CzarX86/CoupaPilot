@@ -308,6 +308,46 @@ def test_edge_capture_uses_dedicated_profile_when_corporate_is_detected(tmp_path
     assert strategy["corporate_display_name"] == "Unilever Work"
 
 
+def test_edge_profile_access_denied_falls_back_to_dedicated_profile(tmp_path):
+    edge_executable = tmp_path / "Microsoft Edge"
+    edge_executable.write_text("fake", encoding="utf-8")
+
+    class Catalog(FakeCatalog):
+        installation = BrowserInstallation(BrowserKind.EDGE, "Microsoft Edge", str(edge_executable))
+
+    class Detector:
+        def detect(self, *, ignore_running=False):
+            raise PermissionError(1, "Operation not permitted", "Microsoft Edge")
+
+    profiles = FakeProfiles(tmp_path)
+    login = BrowserLogin()
+    capture = {}
+    login.capture = lambda installation, profile_dir, **kwargs: (
+        capture.update({"profile_dir": profile_dir, **kwargs}) or {"_coupa_session": "new-session"}
+    )
+    trace = tmp_path / "auth.jsonl"
+    service = AuthService(
+        store=FakeStore(),
+        validator=FakeValidator([AuthState.EXPIRED, AuthState.VALID]),
+        catalog=Catalog,
+        profiles=profiles,
+        browser_login=login,
+        edge_profile_detector=Detector(),
+        edge_devtools_connector=type("DevTools", (), {"discover": lambda self: None})(),
+        diagnostic_log_path=trace,
+    )
+
+    result = asyncio.run(service.ensure_session(interactive=True))
+
+    assert result.state is AuthState.VALID
+    assert capture["profile_dir"] == profiles.path
+    assert capture["existing_profile"] is False
+    assert capture["profile_name"] == "Default"
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    selection = [event for event in events if event.get("event") == "edge_profile_selection"]
+    assert selection[-1]["code"] == "EDGE_PROFILE_ACCESS_DENIED"
+
+
 def test_edge_capture_stops_instead_of_opening_wrong_profile_when_edge_is_open(tmp_path):
     edge_executable = tmp_path / "Microsoft Edge"
     edge_executable.write_text("fake", encoding="utf-8")

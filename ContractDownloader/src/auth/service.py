@@ -271,11 +271,27 @@ class AuthService:
             report("checking", "Detecting corporate Edge profile…")
             try:
                 detection = self.edge_profile_detector.detect()
+            except PermissionError as exc:
+                # macOS privacy controls can deny access to the user's Edge
+                # data directory even when the app-owned profile is usable.
+                # Profile detection is an optimization; it must not prevent a
+                # fresh sign-in in the dedicated Contract Downloader profile.
+                self.record_diagnostic(
+                    "edge_profile_selection",
+                    attempt_id=attempt_id,
+                    code="EDGE_PROFILE_ACCESS_DENIED",
+                    error=str(exc),
+                )
+                report(
+                    "checking",
+                    "Could not inspect the existing Edge profile; continuing with the dedicated sign-in profile.",
+                )
+                detection = None
             except Exception as exc:
                 raise AuthenticationActionRequired(
                     f"[EDGE_PROFILE_SELECTION_FAILED] Could not inspect the Edge profiles: {exc}"
                 ) from exc
-            if detection.state == "edge_must_be_closed":
+            if detection is not None and detection.state == "edge_must_be_closed":
                 report("checking", "Checking Edge process and profile lock…")
                 metadata = self.edge_profile_detector.detect(ignore_running=True)
                 if metadata.state == "profile_detected" and metadata.selected:
@@ -288,11 +304,12 @@ class AuthService:
                     "[EDGE_PROFILE_IN_USE] Microsoft Edge is open and its corporate profile cannot be selected. "
                     "Close it completely with ⌘Q and try again."
                 )
-            if detection.state == "action_required" and detection.candidates:
+            if detection is not None and detection.state == "action_required" and detection.candidates:
                 code = detection.code or "EDGE_PROFILE_AMBIGUOUS"
                 raise AuthenticationActionRequired(f"[{code}] {detection.message}")
-            selected_corporate_profile = detection.selected
-            if selected_corporate_profile is None and detection.code:
+            if detection is not None:
+                selected_corporate_profile = detection.selected
+            if selected_corporate_profile is None and detection is not None and detection.code:
                 self.record_diagnostic(
                     "edge_profile_selection",
                     attempt_id=attempt_id,

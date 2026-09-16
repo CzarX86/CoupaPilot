@@ -1050,6 +1050,16 @@ def _activate_macos_window() -> None:
         pass
 
 
+def _runtime_webview_icon(icon_file: str, platform: str | None = None) -> str | None:
+    """Use a runtime icon override only on platforms that need one."""
+    current_platform = platform or sys.platform
+    if current_platform == "darwin":
+        # Cocoa already reads the high-resolution icon from the .app bundle.
+        # Passing the web favicon here replaces it with a low-resolution icon.
+        return None
+    return icon_file if os.path.isfile(icon_file) else None
+
+
 def calculate_window_geometry(screen_width: int, screen_height: int, screen_x: int = 0, screen_y: int = 0) -> dict[str, int]:
     """Size the window to 88% of the screen width and center it.
 
@@ -1147,7 +1157,7 @@ def main():
         webview.start(
             debug=False,
             http_server=True,
-            icon=icon_file if os.path.isfile(icon_file) else None,
+            icon=_runtime_webview_icon(icon_file),
         )
     except Exception as exc:
         log_path = Path.home() / ".contract_downloader" / "startup.log"
