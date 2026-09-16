@@ -103,6 +103,19 @@ def test_pythonw_gui_uses_console_python_for_cli_worker(monkeypatch, tmp_path):
     assert command[1].endswith("process_all_pos.py")
 
 
+def test_supplier_retry_command_targets_existing_session():
+    supervisor = CliProcessSupervisor()
+    command = supervisor._command(
+        retry_in_place_supplier="Supplier A",
+        source_session_id=17,
+        run_dir="/tmp/run-17",
+        concurrency=11,
+    )
+    assert "--retry-in-place-supplier" in command
+    assert command[command.index("--retry-in-place-supplier") + 1] == "Supplier A"
+    assert command[command.index("--retry-session-id") + 1] == "17"
+
+
 def test_windows_cli_worker_does_not_create_a_console_window(monkeypatch):
     import src.gui.cli_supervisor as supervisor_module
 
@@ -170,7 +183,57 @@ def test_history_status_translation_preserves_filter_inputs():
     assert 'id="retry-result-modal"' in html
     assert 'id="btn-save-retry-result"' in html
     assert 'id="btn-discard-retry-result"' in html
+    assert 'id="run-complete-card"' in html
+    assert 'id="btn-open-complete-report"' in html
+    assert 'id="btn-open-complete-folder"' in html
+    assert 'open_run_report' in javascript
+    assert 'open_run_folder' in javascript
+    assert 'btn-open-run-folder' not in javascript
+    assert 'formatHistoryDate' in javascript
+    assert 'id="modal-input-link"' in html
+    assert 'id="modal-run-folder"' in html
+    assert 'id="btn-delete-detail"' in html
+    assert 'run-summary-entity-tabs' in html
+    assert '<th>Input</th>' not in html
+    assert '<th>Description</th>' not in html
+    assert 'setButtonBusy' in javascript
+    assert 'aria-busy' in javascript
+    assert '.btn.is-busy' in (web_root / "style.css").read_text(encoding="utf-8")
     assert '#retry-edit-modal, #retry-result-modal' in (web_root / "style.css").read_text(encoding="utf-8")
+
+
+def test_run_artifact_actions_open_the_session_folder_and_report(tmp_path, monkeypatch):
+    from src.db.session_db import SessionDB
+    import src.gui.cli_supervisor as supervisor_module
+
+    db_path = tmp_path / "sessions.db"
+    SessionDB(str(db_path)).close()
+    run_dir = tmp_path / "run_20260804"
+    run_dir.mkdir()
+    input_path = run_dir / "input_source_1.xlsx"
+    input_path.write_bytes(b"input")
+    report_path = run_dir / "report_session_1.xlsx"
+    report_path.write_bytes(b"report")
+
+    supervisor = CliProcessSupervisor()
+    supervisor.db_path = db_path
+    supervisor._session_metadata.clear()
+    with supervisor._connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, input_file, input_file_path, status) VALUES (1, 'input.xlsx', ?, 'SUCCESS')",
+            (str(input_path),),
+        )
+
+    opened = []
+    monkeypatch.setattr(supervisor_module.sys, "platform", "darwin")
+    monkeypatch.setattr(supervisor_module.subprocess, "Popen", lambda command: opened.append(command))
+
+    folder_result = supervisor.open_run_folder(1)
+    report_result = supervisor.open_run_report(1)
+
+    assert folder_result == {"success": True, "path": str(run_dir)}
+    assert report_result == {"success": True, "path": str(report_path)}
+    assert opened == [["open", str(run_dir)], ["open", str(report_path)]]
 
 
 # ── Run description and archived-input protection ────────────────────────

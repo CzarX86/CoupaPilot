@@ -1,6 +1,6 @@
 [project]
 name = "contractdownloader"
-version = "0.1.0"
+version = "1.0.0"
 description = "Contract Downloader — high-performance PO attachment download engine"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,7 @@ dependencies = [
     "lxml>=6.1.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
+    "pyxlsb>=1.0.10",
     "pywebview>=6.2.1",
     "selenium>=4.30.0",
     "truststore>=0.10.0",

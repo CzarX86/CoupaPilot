@@ -18,7 +18,7 @@ from src.engine.coupa_metadata import CoupaMetadataExtractor
 from src.engine.rate_limiter import RateLimiter
 from src.db.coupa_metadata import CoupaMetadataRepository
 from src.engine.tls import system_ssl_context
-from src.auth.cookie_store import CookieStore, CookieStoreError
+from src.auth.cookie_store import CookieStore, CookieStoreError, SecureSessionStore
 
 
 class CoupaCrawler:
@@ -35,7 +35,7 @@ class CoupaCrawler:
         enable_circuit_breaker: Optional[bool] = None,
         preserve_existing_files: bool = False,
         metadata_repository: Optional[CoupaMetadataRepository] = None,
-        cookie_store: Optional[CookieStore] = None,
+        cookie_store: Optional[CookieStore | SecureSessionStore] = None,
         diagnostic_log_path: Optional[str] = None,
         download_timeout: float = 60.0,
         download_attempts: int = 2,
@@ -111,8 +111,20 @@ class CoupaCrawler:
             if response.status_code == 429:
                 self.rate_limiter.report_429()
                 raise RateLimitError(f"Rate limited on {label or url}")
+            if response.status_code in {401, 403}:
+                raise SessionExpiredError(
+                    f"Coupa returned HTTP {response.status_code} for {label or url}"
+                )
             self.rate_limiter.report_success()
             response.raise_for_status()
+            lowered_text = response.text.lower()
+            if any(marker in lowered_text for marker in (
+                "access denied",
+                "you do not have permission",
+                "not authorized to view",
+                "insufficient privileges",
+            )):
+                raise AccessDeniedError(f"Coupa page denied access for {label or url}")
             final_url = str(response.url)
             if (
                 "sessions/login" in final_url
@@ -232,6 +244,10 @@ class CoupaCrawler:
                 if response.status_code == 429:
                     self.rate_limiter.report_429()
                     raise RateLimitError(f"Rate limited on download {url}")
+                if response.status_code in {401, 403}:
+                    raise SessionExpiredError(
+                        f"Coupa returned HTTP {response.status_code} while downloading {url}"
+                    )
                 self.rate_limiter.report_success()
                 response.raise_for_status()
 
@@ -392,6 +408,42 @@ class CoupaCrawler:
 
         return ""
 
+    async def preflight_company_access(
+        self,
+        company_pos: Dict[str, List[str]],
+        sample_limit: int = 5,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Sample Coupa pages per Company Code before starting downloads.
+
+        A single denied page is not enough evidence: the sample is expanded
+        up to ``sample_limit`` and only a consistently denied sample blocks
+        the group.
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        for company_code, po_numbers in company_pos.items():
+            samples = list(dict.fromkeys(str(po) for po in po_numbers if po))[:sample_limit]
+            denied = 0
+            accessible = 0
+            errors: list[str] = []
+            for po_number in samples:
+                try:
+                    await self._fetch_html(self._po_url(po_number), label=f"preflight PO {po_number}")
+                    accessible += 1
+                except AccessDeniedError as exc:
+                    denied += 1
+                    errors.append(str(exc))
+                except Exception as exc:
+                    errors.append(type(exc).__name__)
+            confirmed = bool(samples) and denied == len(samples)
+            results[str(company_code)] = {
+                "sampled": len(samples),
+                "denied": denied,
+                "accessible": accessible,
+                "confirmed": confirmed,
+                "errors": errors[:3],
+            }
+        return results
+
     async def process_po(self, po_number: str, company_code: str) -> Dict[str, Any]:
         """Process a single PO: check circuit breaker, fetch HTML, parse, download."""
         if self.enable_circuit_breaker:
@@ -464,6 +516,8 @@ class CoupaCrawler:
                     pr_attachments = CoupaParser.extract_attachments(pr_html, base_url=full_pr_url)
                     all_attachments.extend(pr_attachments)
                 except Exception as pr_error:
+                    if isinstance(pr_error, AuthError):
+                        raise
                     # Keep processing PO attachments even when one PR link fails.
                     pr_error_message = self._format_exception(
                         pr_error,
@@ -482,6 +536,9 @@ class CoupaCrawler:
 
             phase = "deduplicate_attachments"
             attachments = CoupaParser.deduplicate_attachments(all_attachments)
+            clear_attachments = getattr(self.db, "clear_po_attachments", None)
+            if clear_attachments:
+                clear_attachments(self.session_id, po_number)
 
             if not attachments:
                 phase = "persist_empty_success"
@@ -500,13 +557,35 @@ class CoupaCrawler:
                 )
                 dest_path = os.path.join(po_dir, current_attachment)
                 if self.preserve_existing_files and self._is_valid_existing_file(dest_path):
-                    continue
-                if self.preserve_existing_files:
+                    download_info = {"bytes": os.path.getsize(dest_path), "attempt": 0}
+                elif self.preserve_existing_files:
                     download_info = await self._download_attachment(
                         att["url"], dest_path, replace_existing=True
                     )
                 else:
                     download_info = await self._download_attachment(att["url"], dest_path)
+                digest = hashlib.sha256()
+                try:
+                    with open(dest_path, "rb") as attachment_stream:
+                        for chunk in iter(lambda: attachment_stream.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                    size_bytes = os.path.getsize(dest_path)
+                    record_attachment = getattr(self.db, "record_po_attachment", None)
+                    if record_attachment:
+                        record_attachment(
+                            self.session_id,
+                            po_number,
+                            current_attachment,
+                            attachment_url=att.get("url"),
+                            sha256=digest.hexdigest(),
+                            size_bytes=size_bytes,
+                            local_path=dest_path,
+                            source_type="PO_OR_PR",
+                        )
+                except OSError:
+                    # An attachment diagnostic must not turn a successful PO
+                    # into an error; the download itself remains authoritative.
+                    pass
                 if isinstance(download_info, dict):
                     self._write_diagnostic(
                         "attachment_downloaded",
@@ -559,11 +638,25 @@ class CoupaCrawler:
                     pass
             if dir_created and os.path.exists(po_dir) and not self.preserve_existing_files:
                 shutil.rmtree(po_dir, ignore_errors=True)
-            self.db.update_po_status(self.session_id, po_number, "ERROR", None, 0, error_msg)
+            auth_required = isinstance(e, AuthError)
+            # An expired session is a batch-level HIL pause, not a failed PO.
+            # Keeping the row PENDING makes resume idempotent and preserves
+            # completed POs without reprocessing them.
+            self.db.update_po_status(
+                self.session_id,
+                po_number,
+                "PENDING" if auth_required else "ERROR",
+                None,
+                0,
+                error_msg if not auth_required else None,
+            )
+            if isinstance(e, AccessDeniedError) and not auth_required:
+                self.db.set_po_access_diagnosis(self.session_id, po_number, "ACCESS_DENIED_CONFIRMED")
             return {
                 "po": po_number,
                 "success": False,
                 "error": error_msg,
+                "auth_required": auth_required,
                 "diagnostic_log": self.diagnostic_log_path,
                 "latency": time.time() - start_time,
             }
@@ -596,4 +689,16 @@ class AttachmentTotalTimeoutError(TimeoutError):
 
 
 class AuthError(Exception):
+    pass
+
+
+class AccessDeniedError(Exception):
+    """Coupa explicitly refused access to the requested PO page."""
+
+    pass
+
+
+class SessionExpiredError(AuthError):
+    """The authenticated HTTP session was rejected by Coupa."""
+
     pass

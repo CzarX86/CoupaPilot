@@ -48,6 +48,7 @@ INIT_BRIDGE_SCRIPT = r"""
     api: {
       select_directory: async () => call('select_directory'),
       select_file: async () => call('select_file'),
+      stage_dropped_file: async (filename, content) => call('stage_dropped_file', filename, content),
       generate_input_template: async () => call('generate_input_template'),
       validate_input_file: async (filepath) => call('validate_input_file', filepath),
       repair_input_file: async (filepath, actions, expectedFingerprint) => call('repair_input_file', filepath, actions, expectedFingerprint),
@@ -102,6 +103,9 @@ class MockBridge:
             return self.download_dir
         if method == "select_file":
             return {"success": False, "error": "Use the browser file picker in probe mode."}
+        if method == "stage_dropped_file":
+            filename = Path(str(args[0] if args else "input.csv")).name
+            return {"success": True, "path": str(Path(self.download_dir) / filename), "name": filename, "size": 1}
         if method == "generate_input_template":
             return {"success": True, "path": str(Path(self.download_dir) / "input_template.csv")}
         if method == "validate_input_file":
@@ -293,6 +297,10 @@ class RealBridge:
             return {str(value): {"minutes_100": None, "samples": 0} for value in (2, 4, 6, 8)}
         if method == "select_file":
             return {"success": False, "error": "Use the browser file picker in probe mode."}
+        if method == "stage_dropped_file":
+            filename = Path(str(args[0] if args else "input.csv")).name
+            content = str(args[1]) if len(args) > 1 else ""
+            return self.api.stage_dropped_file(filename, content)
         if method == "generate_input_template":
             return {"success": True, "path": str(self.run_dir / "input_template.csv")}
         if method == "get_input_columns":
@@ -534,29 +542,28 @@ def run_probe(
             # Guardrail: the first journey step must remain visible and block progression without a file.
             steps.append("checked-next-without-file")
 
-            def complete_journey_to_review():
-                """Walk the New Run journey up to the review step (step 5)."""
-                page.click("#btn-next-input")
+            def complete_journey_to_final_step():
+                """Walk the New Run journey to the final folder approval step."""
+                page.click("#journey-top-action")
                 page.wait_for_selector("#validation-feedback:not([hidden])")
-                page.click("#btn-next-hierarchy")
-                page.click("#btn-next-destination")
-                page.click("#btn-choose-dir")
-                page.click("#btn-next-review")
+                page.click("#journey-top-action")
+                page.wait_for_selector('[data-journey-panel="3"]:not([hidden])')
+                page.locator("#folder-approval").check()
 
             page.locator("#file-input").set_input_files(str(sample_csv))
             steps.append("selected-input-file")
             page.screenshot(path=str(run_dir / "02_file_selected.png"), full_page=True)
 
-            # Guardrail: Start over only exists at the final step and must
-            # reset the journey, re-enabling the input step.
-            complete_journey_to_review()
+            # Guardrail: Start over is available in the sticky journey header
+            # and must reset the journey, re-enabling the input step.
+            complete_journey_to_final_step()
             page.click("#btn-start-over")
             page.wait_for_selector("#dropzone", state="visible")
             steps.append("start-over-clicked")
             page.locator("#file-input").set_input_files(str(sample_csv))
             steps.append("re-selected-after-start-over")
-            complete_journey_to_review()
-            page.click("#btn-start-run")
+            complete_journey_to_final_step()
+            page.click("#journey-top-action")
             steps.append("clicked-start")
 
             page.wait_for_selector("#screen-progress.active")
@@ -610,6 +617,8 @@ def run_probe(
             # Guardrail: body zoom must not extend the main scroll viewport
             # below the native window and make the Settings save button unreachable.
             page.click("#btn-settings")
+            if page.locator("[data-settings-tab='updates']").count() > 0:
+                page.click("[data-settings-tab='updates']")
             page.click("#btn-check-updates")
             steps.append("manual-update-check")
             page.locator(".main-content").evaluate("el => { el.scrollTop = el.scrollHeight; }")
@@ -639,7 +648,7 @@ def run_probe(
             }""")
             sidebar_controls_visible = all(
                 page.locator(selector).is_visible()
-                for selector in (".brand", ".sidebar > .nav-menu", ".sidebar-bottom", "#btn-learn", "#btn-settings", ".engine-status", "#btn-diagnostics", "#btn-authenticate")
+                for selector in (".brand", ".sidebar > .nav-menu", ".sidebar-bottom", "#btn-learn", "#btn-settings", "#btn-diagnostics", "#btn-authenticate")
             )
             dom_state = {
                 "progress_text": page.locator("#progress-text").inner_text(),

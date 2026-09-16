@@ -1,9 +1,11 @@
+import hashlib
 import os
 import sys
 import asyncio
 import time
 import argparse
 import json
+import re
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 import pandas as pd
@@ -11,6 +13,7 @@ from src.db.session_db import SessionDB
 from src.db.coupa_metadata import CoupaMetadataRepository
 from src.engine.crawler import CoupaCrawler
 from src.reports.coupa_excel import enrich_excel_report
+from src.reports.attachment_relationships import build_attachment_relationships
 from src.auth import AuthService, AuthState
 from src.engine.msg_converter import find_msg_files, MsgToPdfConverter
 from src.engine.input_schema import canonicalize_po_value, clean_scalar, detect_csv_separator, detect_po_parts, is_excel_numeric_coercion, is_placeholder_po, is_placeholder_supplier, is_valid_canonical_po, normalize_po_value, normalize_supplier_value
@@ -42,8 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=4,
-        help="Concurrent downloads (1-8, default: 4)",
+        default=11,
+        help="Concurrent downloads (1-11, default: 11)",
     )
     parser.add_argument(
         "--retry-attempts",
@@ -71,6 +74,11 @@ def parse_args() -> argparse.Namespace:
         "--retry-in-place-errors",
         action="store_true",
         help="Retry ERROR/SKIPPED rows in the existing session",
+    )
+    parser.add_argument(
+        "--retry-in-place-supplier",
+        default=None,
+        help="Retry eligible rows for one supplier in the existing session",
     )
     parser.add_argument(
         "--provisional-retry",
@@ -208,13 +216,18 @@ def _clean_folder_part(value: str) -> str:
         cleaned = "Unknown"
     cleaned = cleaned.replace("/", "_").replace("\\", "_")
     cleaned = "_".join(cleaned.split())
+    cleaned = re.sub(r"_+", "_", cleaned)
     cleaned = cleaned.strip("._")
+    if len(cleaned) > 120:
+        digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:10]
+        cleaned = f"{cleaned[:108].rstrip('_')}_{digest}"
     return cleaned or "Unknown"
 
 
 def _extract_hierarchy_columns(
     df: pd.DataFrame,
     requested_order: list[str] | None = None,
+    supplier_column: str | None = None,
 ) -> tuple[list[str], bool]:
     sep_col = None
     for c in df.columns:
@@ -223,27 +236,37 @@ def _extract_hierarchy_columns(
             break
 
     cols = [str(c) for c in df.columns]
-    if requested_order is not None and not requested_order:
-        # The GUI explicitly disabled every optional level: only Supplier is used.
-        return [], False
+    supplier_name = str(supplier_column or next(
+        (column for column in cols if column.casefold() == "supplier"),
+        "SUPPLIER",
+    ))
     if sep_col is not None:
         sep_idx = cols.index(str(sep_col))
-        hierarchy_cols = cols[sep_idx + 1 :]
+        optional_cols = cols[sep_idx + 1 :]
     elif requested_order is not None:
         # Non-standard inputs without the <|> separator: every column is a
         # hierarchy candidate; the GUI decides which ones to enable.
-        hierarchy_cols = cols
+        optional_cols = [column for column in cols if column != supplier_name]
     else:
         # Plain CLI input without <|> and without an explicit order keeps the
         # classic behavior: only the supplier folder level is created.
-        return [], False
+        return [supplier_name] if supplier_name in cols else [], supplier_name in cols
 
-    if requested_order:
+    if requested_order is not None:
         # Explicit user order wins: these are exactly the columns the GUI
-        # enabled, in the chosen order (Supplier and PO are handled outside).
-        requested = [str(column) for column in requested_order if str(column) in cols]
-        if requested:
-            hierarchy_cols = requested
+        # enabled, including Supplier wherever the user placed it.
+        available = [supplier_name, *optional_cols] if supplier_name in cols else optional_cols
+        allowed = {column.casefold(): column for column in available}
+        requested = []
+        seen = set()
+        for column in requested_order:
+            key = str(column).casefold()
+            if key in allowed and key not in seen:
+                requested.append(allowed[key])
+                seen.add(key)
+        hierarchy_cols = requested
+    else:
+        hierarchy_cols = [supplier_name, *optional_cols] if supplier_name in cols else optional_cols
     if not hierarchy_cols:
         return [], False
 
@@ -260,12 +283,33 @@ def _extract_hierarchy_columns(
     return populated, True
 
 
-def _build_output_subdir(row: pd.Series, supplier: str, hierarchy_cols: list[str], has_hierarchy_data: bool) -> str:
-    # Supplier is always the first folder level; optional hierarchy columns
-    # come next. The PO itself is never a subdir part (it is the file level).
-    parts = [_clean_folder_part(supplier)]
-    if has_hierarchy_data and hierarchy_cols:
-        parts.extend(_clean_folder_part(row.get(col, "")) for col in hierarchy_cols)
+def _build_output_subdir(
+    row: pd.Series,
+    supplier: str,
+    hierarchy_cols: list[str],
+    has_hierarchy_data: bool,
+    supplier_column: str | None = None,
+) -> str:
+    # The PO itself is never a subdir part (it is the file level). When the
+    # caller supplies an explicit hierarchy, Supplier is already in that list
+    # at the position selected by the user.
+    levels = hierarchy_cols if has_hierarchy_data and hierarchy_cols else []
+    supplier_key = str(supplier_column or "SUPPLIER").casefold()
+    if supplier_column is None and levels and not any(str(column).casefold() == supplier_key for column in levels):
+        # Keep compatibility for direct callers that pass only optional levels.
+        levels = [None, *levels]
+    if not levels:
+        levels = [None]
+
+    parts = []
+    seen_parts = set()
+    for column in levels:
+        value = supplier if column is None or str(column).casefold() == supplier_key else row.get(column, "")
+        part = _clean_folder_part(value)
+        if part.casefold() in seen_parts:
+            continue
+        parts.append(part)
+        seen_parts.add(part.casefold())
     return PurePosixPath(*parts).as_posix()
 
 
@@ -279,7 +323,13 @@ def build_output_subdir_map_from_csv(input_csv: str) -> dict[str, str]:
     mapping = parse_mapping_env() or {}
     po_name = mapping.get("po") or "PO_NUMBER"
     supplier_name = mapping.get("supplier") or "SUPPLIER"
-    hierarchy_cols, has_hierarchy_data = _extract_hierarchy_columns(df)
+    hierarchy_order = None
+    if os.environ.get("COUPA_HIERARCHY_ORDER"):
+        try:
+            hierarchy_order = json.loads(os.environ["COUPA_HIERARCHY_ORDER"])
+        except json.JSONDecodeError:
+            hierarchy_order = None
+    hierarchy_cols, has_hierarchy_data = _extract_hierarchy_columns(df, hierarchy_order, supplier_name)
     po_to_subdir: dict[str, str] = {}
 
     for _, row in df.iterrows():
@@ -287,7 +337,7 @@ def build_output_subdir_map_from_csv(input_csv: str) -> dict[str, str]:
         supplier = clean_scalar(row.get(supplier_name, ""))
         po_key = normalize_po_value(po)
         if po_key and supplier:
-            po_to_subdir[po_key] = _build_output_subdir(row, supplier, hierarchy_cols, has_hierarchy_data)
+            po_to_subdir[po_key] = _build_output_subdir(row, supplier, hierarchy_cols, has_hierarchy_data, supplier_name)
     return po_to_subdir
 
 
@@ -313,7 +363,8 @@ def export_original_like_excel_report(
     cursor = db.conn.cursor()
     rows = cursor.execute(
         """
-        SELECT po_number, company_code, status, attachment_count, error_message, remarks, download_folder, updated_at
+        SELECT po_number, company_code, status, attachment_count, error_message, remarks, download_folder, updated_at,
+               expected_company_code, expected_legal_entity, access_diagnosis
         FROM po_downloads
         WHERE session_id = ?
         ORDER BY id ASC
@@ -333,6 +384,9 @@ def export_original_like_excel_report(
                 "remarks",
                 "download_folder",
                 "updated_at",
+                "expected_company_code",
+                "expected_legal_entity",
+                "access_diagnosis",
             ]
         )
 
@@ -348,6 +402,9 @@ def export_original_like_excel_report(
     db_df["REMARKS"] = db_df["remarks"].fillna("")
     db_df["DOWNLOAD_FOLDER"] = db_df["download_folder"].fillna("")
     db_df["LAST_PROCESSED"] = db_df["updated_at"].fillna("")
+    db_df["EXPECTED_COMPANY_CODE"] = db_df["expected_company_code"].fillna(db_df["company_code"])
+    db_df["EXPECTED_LEGAL_ENTITY"] = db_df["expected_legal_entity"].fillna("")
+    db_df["ACCESS_DIAGNOSIS"] = db_df["access_diagnosis"].fillna("")
     db_df["COUPA_URL"] = db_df["po_number"].apply(
         lambda po: f"https://unilever.coupahost.com/order_headers/{str(po)[2:]}"
         if str(po).upper().startswith(("PO", "PM"))
@@ -366,6 +423,9 @@ def export_original_like_excel_report(
         "REMARKS": "REMARKS",
         "DOWNLOAD_FOLDER": "DOWNLOAD_FOLDER",
         "COUPA_URL": "COUPA_URL",
+        "EXPECTED_COMPANY_CODE": "EXPECTED_COMPANY_CODE",
+        "EXPECTED_LEGAL_ENTITY": "EXPECTED_LEGAL_ENTITY",
+        "ACCESS_DIAGNOSIS": "ACCESS_DIAGNOSIS",
     }
     mapped = db_df[list(report_cols.keys())].rename(columns=report_cols)
 
@@ -422,6 +482,10 @@ def export_original_like_excel_report(
         # The attachment report remains usable even if metadata enrichment
         # fails; the error is visible in the CLI log for support diagnostics.
         print(f"[REPORT][COUPA_METADATA][ERROR] {metadata_error}")
+    relationships = build_attachment_relationships(db.list_po_attachments(session_id))
+    if relationships:
+        with pd.ExcelWriter(report_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            pd.DataFrame(relationships).to_excel(writer, sheet_name="ATTACHMENT_RELATIONSHIPS", index=False)
     return report_path
 
 
@@ -433,23 +497,29 @@ def create_session_from_csv(
     po_column: str | None = None,
     supplier_column: str | None = None,
     description: str | None = None,
+    source_metadata: dict | None = None,
 ) -> tuple[int, int]:
     cursor = db.conn.cursor()
     df = read_input_dataframe(input_csv)
-    hierarchy_cols, has_hierarchy_data = _extract_hierarchy_columns(df, hierarchy_order)
+    po_name = po_column or "PO_NUMBER"
+    supplier_name = supplier_column or "SUPPLIER"
+    hierarchy_cols, has_hierarchy_data = _extract_hierarchy_columns(df, hierarchy_order, supplier_name)
     session_id = db.create_session(
         os.path.basename(input_csv),
         execution_type=execution_type,
         description=description or None,
+        source_metadata=source_metadata,
     )
 
-    po_name = po_column or "PO_NUMBER"
-    supplier_name = supplier_column or "SUPPLIER"
+    company_column = next((column for column in ("COMPANY_CODE", "POWERBI_COMPANY_CODE") if column in df.columns), None)
+    legal_entity_column = next((column for column in ("LEGAL_ENTITY_NAME", "LEGAL_ENTITY_CODE") if column in df.columns), None)
     count = 0
     seen_suppliers: dict[str, str] = {}
     for _, row in df.iterrows():
         po = clean_scalar(row.get(po_name, ""))
         company = clean_scalar(row.get(supplier_name, ""))
+        expected_company = clean_scalar(row.get(company_column, "")) if company_column else company
+        expected_legal_entity = clean_scalar(row.get(legal_entity_column, "")) if legal_entity_column else ""
         if detect_po_parts(po)["multiple"] or detect_po_parts(po)["ambiguous"]:
             raise ValueError(f"Multiple or ambiguous PO values in input cell: {po}")
         po = canonicalize_po_value(po)
@@ -472,10 +542,10 @@ def create_session_from_csv(
             raise ValueError(f"PO {po} is linked to multiple Suppliers.")
         if previous_supplier is not None:
             continue
-        output_subdir = _build_output_subdir(row, company, hierarchy_cols, has_hierarchy_data)
+        output_subdir = _build_output_subdir(row, company, hierarchy_cols, has_hierarchy_data, supplier_name)
         cursor.execute(
-            "INSERT OR IGNORE INTO po_downloads (session_id, po_number, company_code, output_subdir, status) VALUES (?, ?, ?, ?, 'PENDING')",
-            (session_id, po, company, output_subdir),
+            "INSERT OR IGNORE INTO po_downloads (session_id, po_number, company_code, output_subdir, status, expected_company_code, expected_legal_entity, supplier_name) VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?)",
+            (session_id, po, expected_company or company, output_subdir, expected_company or company, expected_legal_entity, company),
         )
         if cursor.rowcount:
             count += 1
@@ -519,7 +589,7 @@ def create_retry_session_from_last_errors(
 
     source_session_id = int(latest_row["id"])
     error_rows = cursor.execute(
-        "SELECT po_number, company_code, output_subdir FROM po_downloads WHERE session_id = ? AND status = 'ERROR' ORDER BY id ASC",
+        "SELECT po_number, company_code, supplier_name, output_subdir FROM po_downloads WHERE session_id = ? AND status = 'ERROR' ORDER BY id ASC",
         (source_session_id,),
     ).fetchall()
     if not error_rows:
@@ -533,8 +603,8 @@ def create_retry_session_from_last_errors(
         if (not output_subdir) and po_to_subdir:
             output_subdir = po_to_subdir.get(normalize_po_value(row["po_number"]), "")
         cursor.execute(
-            "INSERT OR IGNORE INTO po_downloads (session_id, po_number, company_code, output_subdir, status) VALUES (?, ?, ?, ?, 'PENDING')",
-            (session_id, row["po_number"], row["company_code"], output_subdir),
+            "INSERT OR IGNORE INTO po_downloads (session_id, po_number, company_code, output_subdir, status, supplier_name) VALUES (?, ?, ?, ?, 'PENDING', ?)",
+            (session_id, row["po_number"], row["company_code"], output_subdir, row["supplier_name"]),
         )
     db.conn.commit()
     return source_session_id, session_id, len(error_rows)
@@ -545,12 +615,20 @@ def prepare_in_place_retry(
     session_id: int,
     po_number: str | None = None,
     errors_only: bool = False,
+    supplier: str | None = None,
 ) -> int:
     cursor = db.conn.cursor()
     if po_number:
         rows = cursor.execute(
             "SELECT po_number, status FROM po_downloads WHERE session_id = ? AND po_number = ?",
             (session_id, canonicalize_po_value(po_number)),
+        ).fetchall()
+    elif supplier:
+        statuses = ("ERROR", "SKIPPED_VERIFICATION_REQUIRED") if errors_only else ("PENDING", "ERROR", "SKIPPED_VERIFICATION_REQUIRED")
+        placeholders = ",".join("?" for _ in statuses)
+        rows = cursor.execute(
+            f"SELECT po_number, status FROM po_downloads WHERE session_id = ? AND COALESCE(NULLIF(supplier_name, ''), company_code) = ? AND status IN ({placeholders})",
+            (session_id, supplier.strip(), *statuses),
         ).fetchall()
     else:
         statuses = ("ERROR", "SKIPPED_VERIFICATION_REQUIRED") if errors_only else ("PENDING", "ERROR", "SKIPPED_VERIFICATION_REQUIRED")
@@ -657,13 +735,14 @@ def create_retry_session_from_incomplete(
 
 async def main():
     args = parse_args()
-    args.concurrency = max(1, min(8, int(args.concurrency)))
+    args.concurrency = max(1, min(11, int(args.concurrency)))
     configured_retries = os.environ.get("COUPA_RETRY_ATTEMPTS")
     args.retry_attempts = max(1, min(3, int(configured_retries or args.retry_attempts or 1)))
     args.msg_processing = args.msg_processing or os.environ.get("COUPA_MSG_PROCESSING", "convert_extract")
     args.deduplicate_files = args.deduplicate_files if args.deduplicate_files is not None else os.environ.get("COUPA_DEDUPLICATE_FILES", "1") != "0"
+    powerbi_source = False
 
-    if not (args.retry_last_errors or args.retry_incomplete_session_id is not None or args.retry_po or args.retry_in_place_po or args.retry_in_place_errors or args.provisional_retry) and not os.path.exists(INPUT_CSV):
+    if not (args.retry_last_errors or args.retry_incomplete_session_id is not None or args.retry_po or args.retry_in_place_po or args.retry_in_place_errors or args.retry_in_place_supplier or args.provisional_retry) and not os.path.exists(INPUT_CSV):
         print(f"[ERROR] Input file not found: {INPUT_CSV}")
         sys.exit(1)
 
@@ -744,7 +823,7 @@ async def main():
         # worker retries ERROR rows directly, allowing the GUI to retain the
         # cumulative progress denominator and counters.
         print(f"[INFO] In-place resume: session={session_id}, pending_or_failed={pending_count}, type={run_type}")
-    elif args.retry_in_place_po or args.retry_in_place_errors:
+    elif args.retry_in_place_po or args.retry_in_place_errors or args.retry_in_place_supplier:
         source_session_id = args.retry_session_id
         if not source_session_id:
             print("[ERROR] --retry-session-id is required for in-place retry.")
@@ -761,6 +840,7 @@ async def main():
             source_session_id,
             po_number=args.retry_in_place_po,
             errors_only=args.retry_in_place_errors,
+            supplier=args.retry_in_place_supplier,
         )
         if count == 0:
             print(f"[INFO] Session {source_session_id} has no POs eligible for retry.")
@@ -863,6 +943,17 @@ async def main():
             sys.exit(2)
         column_mapping = input_validation.get("mapping") or column_mapping
         run_description = os.environ.get("COUPA_RUN_DESCRIPTION") or None
+        source_metadata = None
+        if os.environ.get("COUPA_SOURCE_METADATA"):
+            try:
+                parsed_metadata = json.loads(os.environ["COUPA_SOURCE_METADATA"])
+                source_metadata = parsed_metadata if isinstance(parsed_metadata, dict) else None
+            except json.JSONDecodeError:
+                source_metadata = None
+        powerbi_source = bool(
+            source_metadata
+            and source_metadata.get("source") == "Power BI PO Mass Download Dataset"
+        )
         session_id, count = create_session_from_csv(
             db,
             INPUT_CSV,
@@ -871,6 +962,7 @@ async def main():
             po_column=column_mapping.get("po"),
             supplier_column=column_mapping.get("supplier"),
             description=run_description,
+            source_metadata=source_metadata,
         )
         print(f"[INFO] {count} POs imported and queued for processing.")
         print(f"[INFO] Session type: {run_type}")
@@ -905,7 +997,7 @@ async def main():
         concurrency=args.concurrency,
         request_delay=0.03,
         enable_circuit_breaker=not args.disable_circuit_breaker,
-        preserve_existing_files=bool(args.retry_po or args.retry_in_place_po or args.retry_in_place_errors),
+        preserve_existing_files=bool(args.retry_po or args.retry_in_place_po or args.retry_in_place_errors or args.retry_in_place_supplier),
         cookie_store=auth_service.store,
     )
 
@@ -915,6 +1007,33 @@ async def main():
         f"SELECT po_number, company_code, status, attachment_count FROM po_downloads WHERE session_id = ? AND {status_filter}",
         (session_id,),
     ).fetchall()
+
+    company_pos: dict[str, list[str]] = {}
+    for row in rows:
+        company_pos.setdefault(str(row["company_code"] or ""), []).append(str(row["po_number"]))
+    if company_pos and powerbi_source and not args.provisional_retry:
+        print(f"[INFO] Checking Coupa access for {len(company_pos)} Company Code group(s)...", flush=True)
+        try:
+            access_checks = await crawler.preflight_company_access(company_pos)
+            for company_code, check in access_checks.items():
+                if check.get("confirmed"):
+                    db.set_company_access_diagnosis(session_id, company_code, "ACCESS_DENIED_CONFIRMED")
+                    db.suspend_company_code(session_id, company_code)
+                    print(
+                        f"[WARNING] Company Code {company_code}: access denied in {check['sampled']}/{check['sampled']} sample PO(s); queued POs were skipped.",
+                        flush=True,
+                    )
+                elif check.get("denied"):
+                    print(
+                        f"[WARNING] Company Code {company_code}: mixed preflight result ({check['denied']} denied, {check['accessible']} accessible); processing POs individually.",
+                        flush=True,
+                    )
+        except Exception as exc:
+            print(f"[WARNING] Company Code preflight was inconclusive: {type(exc).__name__}: {exc}", flush=True)
+        rows = cursor.execute(
+            f"SELECT po_number, company_code, status, attachment_count FROM po_downloads WHERE session_id = ? AND {status_filter}",
+            (session_id,),
+        ).fetchall()
 
     pos_list = [(r["po_number"], r["company_code"]) for r in rows]
     all_rows = cursor.execute(
@@ -935,11 +1054,19 @@ async def main():
     }
     total = len(all_rows) if resume_in_place else len(pos_list)
     start_ts = time.time()
+    auth_pause = asyncio.Event()
 
     async def process_one(po_number, company_code):
         result = {"po": po_number, "success": False, "error": "No attempt completed"}
         for attempt in range(args.retry_attempts):
             result = await crawler.process_po(po_number, company_code)
+            if result.get("auth_required"):
+                auth_pause.set()
+                print(
+                    "[AUTH][PAUSED] Coupa rejected the HTTP session. Close Edge, recapture the work SSO session, then resume the pending POs.",
+                    flush=True,
+                )
+                return result
             if result.get("success") or attempt == args.retry_attempts - 1:
                 break
             await asyncio.sleep(min(5.0, 1.0 * (attempt + 1)))
@@ -981,6 +1108,8 @@ async def main():
 
     async def bounded(po, co):
         async with sem:
+            if auth_pause.is_set():
+                return {"po": po, "success": False, "paused": True}
             return await process_one(po, co)
 
     try:
@@ -994,7 +1123,20 @@ async def main():
         print("[INFO] Download pipeline interrupted safely; pending POs remain queued for resume.", flush=True)
         raise
     results = [r for r in results if not isinstance(r, BaseException)]
-    if args.retry_in_place_po or args.retry_in_place_errors:
+    if auth_pause.is_set():
+        db.conn.execute(
+            "UPDATE sessions SET status = 'RUN_PAUSED', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (session_id,),
+        )
+        db.conn.commit()
+        await crawler.close()
+        db.close()
+        print(
+            "[RUN_PAUSED] Authentication is required. Completed POs were preserved; pending POs are ready to resume.",
+            flush=True,
+        )
+        return
+    if args.retry_in_place_po or args.retry_in_place_errors or args.retry_in_place_supplier:
         for result in results:
             po_value = str(result.get("po", ""))
             db.conn.execute(

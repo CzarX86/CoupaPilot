@@ -12,6 +12,8 @@ import sys
 import threading
 import time
 import uuid
+import csv
+from zipfile import BadZipFile
 from collections import deque
 from pathlib import Path
 from typing import Any, Optional
@@ -43,6 +45,7 @@ class CliProcessSupervisor:
         self.started_at = 0.0
         self.stop_requested = False
         self.cancel_requested = False
+        self._paused_for_auth = False
         self._logs: deque[dict[str, str]] = deque(maxlen=100)
         self._progress_samples: deque[tuple[float, int]] = deque(maxlen=180)
         self._last_processed = 0
@@ -78,7 +81,7 @@ class CliProcessSupervisor:
         conn.row_factory = sqlite3.Row
         if not self._schema_ready:
             for column, definition in {
-                "concurrency": "INTEGER DEFAULT 4",
+                "concurrency": "INTEGER DEFAULT 11",
                 "duration_seconds": "REAL",
                 "input_file_path": "TEXT",
                 "input_file_blob": "BLOB",
@@ -174,6 +177,11 @@ class CliProcessSupervisor:
             return {"type": "Success", "message": "Coupa session validated."}
         if "Cookies expirados" in line or "Cached session expired" in line:
             return {"type": "Warning", "message": "The cached Coupa session expired; sign-in is required."}
+        if "[AUTH][PAUSED]" in line or "[RUN_PAUSED]" in line:
+            return {
+                "type": "Warning",
+                "message": "Run paused for authentication. Close Edge, sign in if requested, then resume the pending POs.",
+            }
         if "perfil Work do Edge" in line or "perfil existente do Edge" in line:
             return {"type": "System", "message": "Opening Edge with the existing user profile."}
         if "perfil persistente do app" in line or "perfil persistente do aplicativo" in line:
@@ -240,6 +248,8 @@ class CliProcessSupervisor:
             line = raw_line.strip()
             if not line:
                 continue
+            if "[AUTH][PAUSED]" in line or "[RUN_PAUSED]" in line:
+                self._paused_for_auth = True
             for marker in ("Run folder:", "Pasta desta execucao:"):
                 if marker in line:
                     self.run_dir = line.split(marker, 1)[1].strip()
@@ -304,12 +314,13 @@ class CliProcessSupervisor:
         retry_po: Optional[str] = None,
         retry_in_place_po: Optional[str] = None,
         retry_in_place_errors: bool = False,
+        retry_in_place_supplier: Optional[str] = None,
         resume_in_place_session_id: Optional[int] = None,
         provisional_retry_attempt_id: Optional[int] = None,
         retry_staging_dir: Optional[str] = None,
         source_session_id: Optional[int] = None,
         run_dir: Optional[str] = None,
-        concurrency: int = 4,
+        concurrency: int = 11,
     ) -> list[str]:
         if getattr(sys, "frozen", False):
             command = [sys.executable, "--cli-pipeline", "--concurrency", str(max(1, int(concurrency)))]
@@ -331,6 +342,10 @@ class CliProcessSupervisor:
                 command.extend(["--retry-session-id", str(source_session_id)])
         elif retry_in_place_errors:
             command.append("--retry-in-place-errors")
+            if source_session_id:
+                command.extend(["--retry-session-id", str(source_session_id)])
+        elif retry_in_place_supplier:
+            command.extend(["--retry-in-place-supplier", retry_in_place_supplier])
             if source_session_id:
                 command.extend(["--retry-session-id", str(source_session_id)])
         elif resume_in_place_session_id:
@@ -368,6 +383,7 @@ class CliProcessSupervisor:
         retry_po: Optional[str] = None,
         retry_in_place_po: Optional[str] = None,
         retry_in_place_errors: bool = False,
+        retry_in_place_supplier: Optional[str] = None,
         resume_in_place_session_id: Optional[int] = None,
         provisional_retry_attempt_id: Optional[int] = None,
         retry_staging_dir: Optional[str] = None,
@@ -380,6 +396,7 @@ class CliProcessSupervisor:
         deduplicate_files: bool = True,
         description: Optional[str] = None,
         column_mapping: Optional[dict[str, str]] = None,
+        source_metadata: Optional[dict[str, Any]] = None,
         auth_browser: Optional[str] = None,
     ) -> dict[str, Any]:
         with self._lock:
@@ -389,9 +406,10 @@ class CliProcessSupervisor:
             self.download_root = str(Path(download_root or self.default_download_root).expanduser().resolve())
             self.source_session_id = source_session_id
             self.run_dir = run_dir
-            self.session_id = source_session_id if (retry_in_place_po or retry_in_place_errors or resume_in_place_session_id or provisional_retry_attempt_id) else None
+            self.session_id = source_session_id if (retry_in_place_po or retry_in_place_errors or retry_in_place_supplier or resume_in_place_session_id or provisional_retry_attempt_id) else None
             self.stop_requested = False
             self.cancel_requested = False
+            self._paused_for_auth = False
             self.started_at = time.time()
             self._logs.clear()
             self._progress_samples.clear()
@@ -411,6 +429,8 @@ class CliProcessSupervisor:
                 env["COUPA_HIERARCHY_ORDER"] = json.dumps(hierarchy_order)
             if description:
                 env["COUPA_RUN_DESCRIPTION"] = str(description).strip()
+            if source_metadata:
+                env["COUPA_SOURCE_METADATA"] = json.dumps(source_metadata, ensure_ascii=False)
             if column_mapping:
                 env["COUPA_COLUMN_MAPPING"] = json.dumps(column_mapping)
             env["COUPA_RETRY_ATTEMPTS"] = str(max(1, min(3, int(retry_attempts or 1))))
@@ -429,6 +449,7 @@ class CliProcessSupervisor:
                 retry_po=retry_po,
                 retry_in_place_po=retry_in_place_po,
                 retry_in_place_errors=retry_in_place_errors,
+                retry_in_place_supplier=retry_in_place_supplier,
                 resume_in_place_session_id=source_session_id if resume_in_place_session_id else None,
                 provisional_retry_attempt_id=provisional_retry_attempt_id,
                 retry_staging_dir=retry_staging_dir,
@@ -489,6 +510,8 @@ class CliProcessSupervisor:
             return "STOPPING" if self.stop_requested else "RUNNING"
         if self.cancel_requested:
             return "CANCELLED"
+        if self._paused_for_auth:
+            return "RUN_PAUSED"
         if self.stop_requested:
             return "STOPPED"
         if stats["pending"] > 0:
@@ -742,11 +765,62 @@ class CliProcessSupervisor:
                     pass
         return metadata
 
+    @staticmethod
+    def _detail_header(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().casefold()).strip("_")
+
+    @classmethod
+    def _supplier_by_po_from_input(cls, input_path: str) -> dict[str, str]:
+        """Read supplier labels for run summaries without changing the run schema."""
+        path = Path(str(input_path or "")).expanduser()
+        if not path.is_file():
+            return {}
+        try:
+            if path.suffix.casefold() in {".csv", ".tsv", ".txt"}:
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    sample = handle.read(4096)
+                    handle.seek(0)
+                    try:
+                        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+                    except csv.Error:
+                        dialect = csv.excel_tab if "\t" in sample else csv.excel
+                    rows = csv.DictReader(handle, dialect=dialect)
+                    records = list(rows)
+            else:
+                from openpyxl import load_workbook
+
+                sheet = load_workbook(path, read_only=True, data_only=True).active
+                values = sheet.iter_rows(values_only=True)
+                headers = next(values, ())
+                records = [dict(zip(headers, row)) for row in values]
+            if not records:
+                return {}
+            headers = list(records[0].keys())
+            normalized = {header: cls._detail_header(header) for header in headers}
+            po_header = next((header for header, key in normalized.items() if key in {"po", "po_number", "ponumber", "purchase_order"}), None)
+            supplier_header = next((header for header, key in normalized.items() if key in {"supplier", "supplier_uu", "supplier_uu_name", "supplier_uu_code"} or "supplier" in key), None)
+            if not po_header or not supplier_header:
+                return {}
+            result = {}
+            for record in records:
+                po = str(record.get(po_header) or "").strip()
+                supplier = str(record.get(supplier_header) or "").strip()
+                if po and supplier:
+                    result[po] = supplier
+            return result
+        except (OSError, ValueError, KeyError, csv.Error, BadZipFile):
+            return {}
+
     def open_input_file(self, session_id: int) -> dict[str, Any]:
         context = self._session_context(session_id)
         path = Path(context.get("input_path", "")).expanduser()
         if not path.exists():
             return {"success": False, "error": "The preserved input file is not available for this run."}
+        return self._open_path(path)
+
+    @staticmethod
+    def _open_path(path: Path) -> dict[str, Any]:
+        """Open a local file or folder with the operating system launcher."""
         try:
             if sys.platform == "darwin":
                 subprocess.Popen(["open", str(path)])
@@ -757,6 +831,23 @@ class CliProcessSupervisor:
             return {"success": True, "path": str(path)}
         except OSError as exc:
             return {"success": False, "error": str(exc)}
+
+    def open_run_folder(self, session_id: int) -> dict[str, Any]:
+        context = self._session_context(int(session_id))
+        run_dir_value = str(context.get("run_dir") or "").strip()
+        run_dir = Path(run_dir_value).expanduser() if run_dir_value else None
+        if run_dir is None or not run_dir.is_dir():
+            return {"success": False, "error": "The download folder is not available for this run."}
+        return self._open_path(run_dir)
+
+    def open_run_report(self, session_id: int) -> dict[str, Any]:
+        exported = self.export_report(int(session_id))
+        if not exported.get("success"):
+            return exported
+        report_path = Path(str(exported.get("filepath", ""))).expanduser()
+        if not report_path.is_file():
+            return {"success": False, "error": "The Excel report is not available for this run."}
+        return self._open_path(report_path)
 
     def retry_po_with_edit(self, session_id: int, original_po: str, edited_po: str) -> dict[str, Any]:
         """Run an edited PO in a staging directory until the user commits it."""
@@ -1083,6 +1174,23 @@ class CliProcessSupervisor:
             run_dir=self.run_dir,
         )
 
+    def retry_supplier(self, session_id: int, supplier: str) -> dict[str, Any]:
+        value = str(supplier or "").strip()
+        if not value:
+            return {"success": False, "error": "Supplier is required."}
+        context = self._session_context(session_id)
+        input_path = context.get("input_path") or self.input_path
+        run_dir = context.get("run_dir") or self.run_dir
+        if not input_path or not Path(input_path).exists():
+            return {"success": False, "error": "The original input file is not available for this run."}
+        return self.start(
+            input_path,
+            self.download_root or str(self.default_download_root),
+            retry_in_place_supplier=value,
+            source_session_id=session_id,
+            run_dir=run_dir,
+        )
+
     @staticmethod
     def _coupa_url(po_number: str) -> str:
         value = str(po_number or "").strip()
@@ -1155,23 +1263,27 @@ class CliProcessSupervisor:
         self._apply_retention()
         with self._connect() as conn:
             sessions = conn.execute("SELECT * FROM sessions ORDER BY id DESC").fetchall()
-            result = []
-            for session in sessions:
-                stats = self._stats(int(session["id"]))
-                metadata = self._session_metadata.get(str(session["id"]), {})
-                session_data = dict(session)
-                session_data.pop("input_file_blob", None)
-                result.append({
-                    **session_data,
-                    "input_file_path": session["input_file_path"] or metadata.get("input_path", ""),
-                    "run_dir": metadata.get("run_dir", ""),
-                    "status": self._derived_status(stats, session["status"]),
-                    "total_pos": stats["total"],
-                    "success_count": stats["success"],
-                    "error_count": stats["errors"],
-                    "pending_count": stats["pending"],
-                })
-            return result
+        result = []
+        for session in sessions:
+            session_id = int(session["id"])
+            stats = self._stats(session_id)
+            context = self._session_context(session_id)
+            session_data = dict(session)
+            session_data.pop("input_file_blob", None)
+            run_dir = str(context.get("run_dir") or "")
+            report_path = str(Path(run_dir) / f"report_session_{session_id}.xlsx") if run_dir else ""
+            result.append({
+                **session_data,
+                "input_file_path": session["input_file_path"] or context.get("input_path", ""),
+                "run_dir": run_dir,
+                "report_path": report_path if Path(report_path).is_file() else "",
+                "status": self._derived_status(stats, session["status"]),
+                "total_pos": stats["total"],
+                "success_count": stats["success"],
+                "error_count": stats["errors"],
+                "pending_count": stats["pending"],
+            })
+        return result
 
     def reset_local_state_preserving_files(self) -> dict[str, Any]:
         """Forget local run records without deleting downloaded files."""
@@ -1182,6 +1294,7 @@ class CliProcessSupervisor:
             with self._connect() as conn:
                 conn.execute("DELETE FROM retry_events")
                 conn.execute("DELETE FROM retry_attempts")
+                conn.execute("DELETE FROM po_attachments")
                 conn.execute("DELETE FROM po_downloads")
                 conn.execute("DELETE FROM sessions")
                 try:
@@ -1317,6 +1430,7 @@ class CliProcessSupervisor:
                     return {"success": False, "error": "Run not found."}
                 conn.execute("DELETE FROM retry_events WHERE session_id = ?", (session_id,))
                 conn.execute("DELETE FROM retry_attempts WHERE session_id = ?", (session_id,))
+                conn.execute("DELETE FROM po_attachments WHERE session_id = ?", (session_id,))
                 conn.execute("DELETE FROM po_downloads WHERE session_id = ?", (session_id,))
                 conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
                 conn.commit()
@@ -1341,6 +1455,7 @@ class CliProcessSupervisor:
             session_data.pop("input_file_blob", None)
             metadata = self._session_context(session_id)
             session_data["input_file_path"] = session_data.get("input_file_path") or metadata.get("input_path", "")
+            session_data["run_dir"] = str(metadata.get("run_dir") or "")
             stats = self._stats(session_id)
             session_data["status"] = self._derived_status(stats, session_data.get("status", "PENDING"))
             session_data.update({
@@ -1349,10 +1464,19 @@ class CliProcessSupervisor:
                 "error_count": stats["errors"],
                 "pending_count": stats["pending"],
             })
+        supplier_by_po = self._supplier_by_po_from_input(
+            str(session_data.get("input_file_path", "")) if session_data else ""
+        )
         po_data = []
         for row in rows:
             item = dict(row)
             item["coupa_url"] = self._coupa_url(item.get("po_number", ""))
+            item["supplier"] = supplier_by_po.get(str(item.get("po_number") or "").strip(), "")
+            if not item["supplier"]:
+                for input_po, supplier in supplier_by_po.items():
+                    if self._po_values_equal(input_po, item.get("po_number", "")):
+                        item["supplier"] = supplier
+                        break
             po_data.append(item)
         return {"session": session_data, "pos": po_data, "retry_events": [dict(event) for event in retry_events]}
 
@@ -1360,9 +1484,11 @@ class CliProcessSupervisor:
         details = self.details(session_id)
         if not details["session"]:
             return {"success": False, "error": "Session not found."}
+        context = self._session_context(int(session_id))
         existing = None
-        if self.run_dir:
-            candidate = Path(self.run_dir) / f"report_session_{session_id}.xlsx"
+        run_dir = str(context.get("run_dir") or self.run_dir or "").strip()
+        if run_dir:
+            candidate = Path(run_dir) / f"report_session_{session_id}.xlsx"
             if candidate.exists():
                 existing = candidate
         if existing is None:
@@ -1372,7 +1498,8 @@ class CliProcessSupervisor:
                 existing = matches[0]
         if existing:
             return {"success": True, "filepath": str(existing), "existing": True}
-        output = Path(destination or (Path.home() / "Downloads" / f"report_session_{session_id}.xlsx"))
+        default_output = Path(run_dir) / f"report_session_{session_id}.xlsx" if run_dir else Path.home() / "Downloads" / f"report_session_{session_id}.xlsx"
+        output = Path(destination or default_output)
         output.parent.mkdir(parents=True, exist_ok=True)
         import pandas as pd
         pd.DataFrame(details["pos"]).to_excel(output, index=False)

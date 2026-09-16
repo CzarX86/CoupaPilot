@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.engine.crawler import (
     AttachmentTotalTimeoutError,
+    AccessDeniedError,
     AuthError,
     CoupaCrawler,
     RateLimitError,
@@ -21,6 +22,7 @@ class MockSessionDB:
         self.po_records = {}
         self.updates = []
         self.suspended = set()
+        self.access_diagnoses = {}
 
     def get_company_stats(self, session_id: int, company_code: str):
         return self.company_stats.get(
@@ -30,6 +32,9 @@ class MockSessionDB:
 
     def suspend_company_code(self, session_id: int, company_code: str):
         self.suspended.add((session_id, company_code))
+
+    def set_po_access_diagnosis(self, session_id: int, po_number: str, diagnosis: str):
+        self.access_diagnoses[(session_id, po_number)] = diagnosis
 
     def get_po(self, session_id: int, po_number: str):
         return self.po_records.get((session_id, po_number))
@@ -115,6 +120,28 @@ async def test_process_po_with_pr_and_dedup(tmp_download_dir):
     po_record = db.get_po(1, "PO123")
     assert po_record["status"] == "SUCCESS"
     assert po_record["download_folder"] is not None
+    await crawler.close()
+
+
+@pytest.mark.asyncio
+async def test_preflight_expands_denied_sample_before_blocking(tmp_download_dir):
+    db = MockSessionDB()
+    crawler = CoupaCrawler(db=db, session_id=1, base_download_dir=tmp_download_dir)
+    calls = []
+
+    async def denied_then_accessible(url: str, label: str = ""):
+        calls.append(url)
+        if len(calls) < 3:
+            raise AccessDeniedError("denied")
+        return "<html><body>PO page</body></html>"
+
+    crawler._fetch_html = denied_then_accessible
+    result = await crawler.preflight_company_access({"CC1": ["PO1", "PO2", "PO3"]})
+
+    assert result["CC1"]["sampled"] == 3
+    assert result["CC1"]["denied"] == 2
+    assert result["CC1"]["accessible"] == 1
+    assert result["CC1"]["confirmed"] is False
     await crawler.close()
 
 

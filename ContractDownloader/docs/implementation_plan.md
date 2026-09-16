@@ -1,6 +1,6 @@
 # Plan: Bootstrapping Contract Downloader (Independent Standalone App)
 
-> **Nota de arquitetura (2026-08-02):** A autenticação descrita neste plano histórico foi desacoplada em `src/auth/`. Consulte [`authentication-architecture.md`](authentication-architecture.md) para as regras atuais de cache, Edge/Chrome, perfis e navegador externo.
+> **Nota de arquitetura (2026-08-12):** Este é um plano histórico de bootstrapping. A versão oficial 1.0.0 usa `SecureSessionStore`, captura o perfil corporativo existente do Edge somente após o usuário fechar o Edge e processa documentos por Direct HTTP. Consulte [`authentication-architecture.md`](authentication-architecture.md) para as regras atuais.
 
 Este plano descreve as etapas técnicas detalhadas para criar, estruturar, implementar e empacotar a nova aplicação portátil **Contract Downloader** na pasta isolada `/ContractDownloader`.
 
@@ -17,7 +17,7 @@ Este plano descreve as etapas técnicas detalhadas para criar, estruturar, imple
 
 > [!IMPORTANT]
 > ### 1. Captura de Cookies (Login)
-> *   **Edge Authenticator Temporário**: Ao clicar em "Conectar ao Coupa", o app abre uma janela do Edge temporária uma única vez (via Selenium) apenas para autenticação rápida. O app captura os cookies de sessão segura, fecha a janela do navegador automaticamente e migra a autenticação para a Engine HTTP assíncrona.
+> *   **Captura SSO do Edge existente**: Ao solicitar autenticação, o app orienta o usuário a fechar todas as janelas do Edge, detecta o perfil com `@unilever.com`, abre-o uma única vez via WebDriver, captura os cookies e fecha somente o WebDriver. A sessão segue para a Engine Direct HTTP assíncrona.
 > 
 > ### 2. Ajuste de Concorrência e Banda
 > *   **Network Benchmarker com Sliders**: A UI exibirá sliders interativos de concorrência e delays. Antes de iniciar, o usuário clica em "Analisar Conexão", o módulo `benchmarker.py` realiza testes de latência rápidos contra o Coupa e pré-preenche na UI as recomendações ótimas (ex: 11 conexões concorrentes, 0.03s delay). O usuário valida e clica em "Iniciar" manualmente.
@@ -138,4 +138,3 @@ Toda a infraestrutura do subprojeto será construída sob este novo diretório.
 - **Validação de Limpeza**: Auditar a pasta física de downloads durante falhas de rede simuladas para garantir que nenhuma pasta física vazia ou sem anexos permaneça no diretório.
 - **Teste de Build**: Gerar o binário via `build_standalone.py` e executá-lo em uma máquina limpa para garantir que a pasta de assets (`sys._MEIPASS`) extrai e lê corretamente sem dependências externas.
 - **Resiliência**: Simular desconexão abrupta do cabo de rede no meio de um lote de downloads e reconectar para certificar que o SQLite retoma exatamente do ponto interrompido sem baixar novamente os itens já completados.
-

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 import pytest
 from src.db.session_db import SessionDB, PODownload
 
@@ -39,6 +40,70 @@ def test_create_session_with_test_execution_type(temp_db):
     assert session["execution_type"] == "TEST"
 
 
+def test_powerbi_management_hierarchy_cache_round_trip(temp_db):
+    paths = [{"l1": "Home Care", "l2": "Europe", "l3": "UK"}]
+
+    assert temp_db.get_powerbi_management_hierarchy() == {"paths": [], "updated_at": None}
+    saved = temp_db.save_powerbi_management_hierarchy(paths)
+    loaded = temp_db.get_powerbi_management_hierarchy()
+
+    assert loaded["paths"] == paths
+    assert loaded["updated_at"] == saved["updated_at"]
+
+
+def test_powerbi_po_columns_cache_round_trip(temp_db):
+    columns = [
+        {
+            "key": "po_number",
+            "label": "PO number",
+            "table": "PurchaseOrder_Allocated",
+            "column": "PO Number",
+            "source": "PurchaseOrder_Allocated[PO Number]",
+            "required": True,
+        },
+        {
+            "key": "supplier_uu",
+            "label": "Supplier UU",
+            "table": "Supplier - Codes",
+            "column": "SupplierHierarchyUU",
+            "source": "Supplier - Codes[SupplierHierarchyUU]",
+            "default": False,
+        },
+    ]
+
+    assert temp_db.get_powerbi_po_columns() == {"columns": [], "updated_at": None}
+    saved = temp_db.save_powerbi_po_columns(columns)
+    loaded = temp_db.get_powerbi_po_columns()
+
+    assert loaded["columns"] == columns
+    assert loaded["updated_at"] == saved["updated_at"]
+
+
+def test_powerbi_po_column_selection_round_trip(temp_db):
+    assert temp_db.get_powerbi_po_column_selection() == {"columns": [], "updated_at": None}
+
+    saved = temp_db.save_powerbi_po_column_selection(["po_number", "company_code", "po_number", " "])
+    loaded = temp_db.get_powerbi_po_column_selection()
+
+    assert loaded["columns"] == ["po_number", "company_code"]
+    assert loaded["updated_at"] == saved["updated_at"]
+
+
+def test_powerbi_po_date_range_and_session_source_metadata_round_trip(temp_db):
+    saved = temp_db.save_powerbi_po_date_range({"min_date": "2021-08-05", "max_date": "2026-08-01"})
+    assert temp_db.get_powerbi_po_date_range() == saved
+
+    session_id = temp_db.create_session(
+        "powerbi.csv",
+        source_metadata={"source": "Power BI PO Mass Download Dataset", "selected_pos": 4},
+    )
+    session = temp_db.get_session(session_id)
+    assert json.loads(session["source_metadata_json"]) == {
+        "source": "Power BI PO Mass Download Dataset",
+        "selected_pos": 4,
+    }
+
+
 def test_add_and_update_po(temp_db):
     session_id = temp_db.create_session("input_test.xlsx")
 
@@ -59,6 +124,29 @@ def test_add_po_with_attachment_count(temp_db):
 
     retrieved = temp_db.get_po(session_id, "PO-1")
     assert retrieved["attachment_count"] == 5
+
+
+def test_attachment_inventory_is_persisted_for_relationship_analysis(temp_db):
+    session_id = temp_db.create_session("input.xlsx")
+    temp_db.record_po_attachment(
+        session_id,
+        "PO-1",
+        "sow.pdf",
+        sha256="abc123",
+        size_bytes=42,
+        local_path="/tmp/sow.pdf",
+    )
+    temp_db.record_po_attachment(
+        session_id,
+        "PO-2",
+        "sow.pdf",
+        sha256="abc123",
+        size_bytes=42,
+        local_path="/tmp/other/sow.pdf",
+    )
+    rows = temp_db.list_po_attachments(session_id)
+    assert [row["po_number"] for row in rows] == ["PO-1", "PO-2"]
+    assert rows[0]["sha256"] == "abc123"
 
 
 def test_update_po_status_default_args(temp_db):

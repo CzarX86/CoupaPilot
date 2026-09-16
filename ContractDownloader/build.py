@@ -13,6 +13,7 @@ Requirements:
 """
 
 import os
+import plistlib
 import sys
 import subprocess
 import shutil
@@ -26,6 +27,7 @@ WEB_ASSETS_SRC = str(PROJECT_ROOT / "src" / "gui" / "web")
 # The frozen app resolves assets from _MEIPASS/gui/web. Keep the package
 # destination independent from the source tree's src/ prefix.
 WEB_ASSETS_DEST = os.path.join("gui", "web")
+VERSION_FILE = PROJECT_ROOT / ".version"
 
 # Packages that PyInstaller may miss (no explicit import but loaded dynamically)
 HIDDEN_IMPORTS = [
@@ -35,6 +37,7 @@ HIDDEN_IMPORTS = [
     "lxml",
     "pandas",
     "openpyxl",
+    "pyxlsb",
     "httpx",
     "webview",
     "selenium",
@@ -48,11 +51,44 @@ HIDDEN_IMPORTS = [
     "src.auth.models",
     "src.auth.service",
     "src.auth.session_validator",
+    "src.powerbi_provider",
     "asyncio",
     "json",
     "sqlite3",
+    "tkinter",
     "process_all_pos",
 ]
+
+# Pillow's optional WebP extension can point to a virtual ``.dylibs`` path
+# that PyInstaller 6.20 does not materialize correctly in a macOS bundle.
+# The application only needs Pillow for screenshot/image handling, not WebP.
+EXCLUDED_IMPORTS = ["PIL._webp"]
+
+
+def _increment_version(value: str) -> str:
+    parts = value.strip().lstrip("vV").split(".")
+    if len(parts) != 3 or any(not part.isdigit() for part in parts):
+        raise ValueError(f"Invalid application version: {value!r}. Expected MAJOR.MINOR.PATCH.")
+    major, minor, patch = (int(part) for part in parts)
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def bump_version() -> tuple[str, str]:
+    current = VERSION_FILE.read_text(encoding="utf-8").strip()
+    next_version = _increment_version(current)
+    VERSION_FILE.write_text(f"{next_version}\n", encoding="utf-8")
+    return current, next_version
+
+
+def _set_macos_bundle_version(bundle: Path, version: str) -> None:
+    info_plist = bundle / "Contents" / "Info.plist"
+    with info_plist.open("rb") as stream:
+        metadata = plistlib.load(stream)
+    metadata["CFBundleShortVersionString"] = version
+    metadata["CFBundleVersion"] = version
+    with info_plist.open("wb") as stream:
+        plistlib.dump(metadata, stream, fmt=plistlib.FMT_BINARY)
+    subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", str(bundle)])
 
 
 def get_separator() -> str:
@@ -79,6 +115,9 @@ def build():
 
     clean_dist()
 
+    previous_version, application_version = bump_version()
+    print(f"  Version: {previous_version} -> {application_version}")
+
     is_windows = sys.platform.startswith("win")
     is_macos = sys.platform == "darwin"
     sep = get_separator()
@@ -99,11 +138,13 @@ def build():
     for imp in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", imp])
 
+    for imp in EXCLUDED_IMPORTS:
+        cmd.extend(["--exclude-module", imp])
+
     # Add web assets (HTML/CSS/JS for the GUI) and release version metadata.
     cmd.append(f"--add-data={WEB_ASSETS_SRC}{sep}{WEB_ASSETS_DEST}")
-    version_file = PROJECT_ROOT / ".version"
-    if version_file.exists():
-        cmd.append(f"--add-data={version_file}{sep}.")
+    if VERSION_FILE.exists():
+        cmd.append(f"--add-data={VERSION_FILE}{sep}.")
 
     # macOS-specific: create .app bundle with icon
     if is_macos:
@@ -136,6 +177,7 @@ def build():
     try:
         subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
     except subprocess.CalledProcessError as e:
+        VERSION_FILE.write_text(f"{previous_version}\n", encoding="utf-8")
         print(f"\n[ERROR] Build failed with exit code: {e.returncode}")
         sys.exit(1)
 
@@ -143,6 +185,7 @@ def build():
     # artifact. Users of this project commonly launch this exact .app path.
     if is_macos:
         built_bundle = PROJECT_ROOT / "dist" / f"{APP_NAME}.app"
+        _set_macos_bundle_version(built_bundle, application_version)
         shortcut_bundle = PROJECT_ROOT / f"{APP_NAME}.app"
         executable = shortcut_bundle / "Contents" / "MacOS" / APP_NAME
         running = False

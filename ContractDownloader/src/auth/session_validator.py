@@ -70,11 +70,11 @@ class SessionValidator:
                         await asyncio.sleep(0.25)
                         continue
                     return SessionCheck(AuthState.EXPIRED, "Cached Coupa session expired.", refreshed, "cache")
-                if response.status_code >= 500:
+                if response.status_code == 429 or response.status_code >= 500:
                     if attempt + 1 < self.attempts:
                         await asyncio.sleep(0.25)
                         continue
-                    return SessionCheck(AuthState.UNAVAILABLE, "Coupa is temporarily unavailable.", refreshed, "cache")
+                    return SessionCheck(AuthState.UNAVAILABLE, "Coupa is temporarily unavailable or rate limited.", refreshed, "cache")
                 else:
                     return SessionCheck(AuthState.EXPIRED, "Coupa rejected the cached session.", refreshed, "cache")
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):

@@ -6,11 +6,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('/Users/juliocezar/Dev/CoupaPilot/ContractDownloader/src/gui/web', 'gui/web'), ('/Users/juliocezar/Dev/CoupaPilot/ContractDownloader/.version', '.')],
-    hiddenimports=['extract_msg', 'fpdf', 'bs4', 'lxml', 'pandas', 'openpyxl', 'httpx', 'webview', 'selenium', 'selenium.webdriver.edge', 'selenium.webdriver.edge.webdriver', 'selenium.webdriver.chrome', 'selenium.webdriver.chrome.webdriver', 'src.auth', 'src.auth.browser', 'src.auth.cookie_store', 'src.auth.models', 'src.auth.service', 'src.auth.session_validator', 'asyncio', 'json', 'sqlite3', 'process_all_pos'],
+    hiddenimports=['extract_msg', 'fpdf', 'bs4', 'lxml', 'pandas', 'openpyxl', 'pyxlsb', 'httpx', 'webview', 'selenium', 'selenium.webdriver.edge', 'selenium.webdriver.edge.webdriver', 'selenium.webdriver.chrome', 'selenium.webdriver.chrome.webdriver', 'src.auth', 'src.auth.browser', 'src.auth.cookie_store', 'src.auth.models', 'src.auth.service', 'src.auth.session_validator', 'src.powerbi_provider', 'asyncio', 'json', 'sqlite3', 'tkinter', 'process_all_pos'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['PIL._webp'],
     noarchive=False,
     optimize=0,
 )

@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 
 SUMMARY_COLUMNS = (
+    "COMPANY_CODE_RECONCILIATION",
     "COUPA_COMPANY_CODE",
     "COUPA_SHIP_TO_USER",
     "COUPA_PAYMENT_TERM",
@@ -82,6 +83,12 @@ def enrich_excel_report(
     workbook = load_workbook(path)
     summary = workbook.worksheets[0]
     summary_headers = _ensure_columns(summary, SUMMARY_COLUMNS)
+    all_summary_headers = {_text(cell.value): cell.column for cell in summary[1] if cell.value is not None}
+    expected_company_column = next(
+        (all_summary_headers[name] for name in ("EXPECTED_COMPANY_CODE", "COMPANY_CODE") if name in all_summary_headers),
+        None,
+    )
+    access_diagnosis_column = all_summary_headers.get("ACCESS_DIAGNOSIS")
 
     metadata_by_po = {
         _po_key(row.get("po_number")): row
@@ -104,8 +111,22 @@ def enrich_excel_report(
             po_key = _po_key(summary.cell(row_number, po_column).value)
             metadata = metadata_by_po.get(po_key, {})
             lines = lines_by_po.get(po_key, [])
+            expected_company = _text(summary.cell(row_number, expected_company_column).value) if expected_company_column else ""
+            access_diagnosis = _text(summary.cell(row_number, access_diagnosis_column).value) if access_diagnosis_column else ""
+            coupa_company = _text(metadata.get("company_code"))
+            if access_diagnosis.startswith("ACCESS_DENIED"):
+                reconciliation = access_diagnosis
+            elif not coupa_company:
+                reconciliation = "NOT_OBSERVED"
+            elif expected_company and coupa_company in {value.strip() for value in expected_company.split("|")}:
+                reconciliation = "MATCH"
+            elif expected_company:
+                reconciliation = "MISMATCH"
+            else:
+                reconciliation = "OBSERVED"
             values = {
-                "COUPA_COMPANY_CODE": metadata.get("company_code", ""),
+                "COMPANY_CODE_RECONCILIATION": reconciliation,
+                "COUPA_COMPANY_CODE": coupa_company,
                 "COUPA_SHIP_TO_USER": metadata.get("ship_to_user", ""),
                 "COUPA_PAYMENT_TERM": metadata.get("payment_term", ""),
                 "COUPA_CRG_CODES": _unique_join(line.get("crg_code") for line in lines),

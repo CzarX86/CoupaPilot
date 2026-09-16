@@ -1,7 +1,9 @@
 import json
+import plistlib
 from pathlib import Path
 
 import build_python_portable as portable
+import build
 
 
 def test_embedded_python_download_is_pinned():
@@ -48,3 +50,39 @@ def test_portable_launcher_uses_official_pythonw_and_manual_updates(monkeypatch,
     assert "runpy.run_path" in python_launcher
     assert metadata["automatic_update_check_default"] is False
     assert metadata["manual_updates"] is True
+
+
+def test_windows_build_launcher_uses_the_native_executable_and_icon():
+    launcher = (Path(build.PROJECT_ROOT) / "build_windows.cmd").read_text(encoding="ascii")
+
+    assert "build.py --windows" in launcher
+    assert "dist\\ContractDownloader.exe" in launcher
+    assert (Path(build.PROJECT_ROOT) / "icon.ico").is_file()
+
+
+def test_build_increments_patch_version(monkeypatch, tmp_path):
+    version_file = tmp_path / ".version"
+    version_file.write_text("1.4.9\n", encoding="utf-8")
+    monkeypatch.setattr(build, "VERSION_FILE", version_file)
+
+    previous, current = build.bump_version()
+
+    assert previous == "1.4.9"
+    assert current == "1.4.10"
+    assert version_file.read_text(encoding="utf-8") == "1.4.10\n"
+
+
+def test_macos_bundle_version_updates_info_plist(monkeypatch, tmp_path):
+    bundle = tmp_path / "ContractDownloader.app"
+    info_plist = bundle / "Contents" / "Info.plist"
+    info_plist.parent.mkdir(parents=True)
+    info_plist.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "0.0.0"}))
+    calls = []
+    monkeypatch.setattr(build.subprocess, "check_call", lambda command: calls.append(command))
+
+    build._set_macos_bundle_version(bundle, "2.3.4")
+
+    metadata = plistlib.loads(info_plist.read_bytes())
+    assert metadata["CFBundleShortVersionString"] == "2.3.4"
+    assert metadata["CFBundleVersion"] == "2.3.4"
+    assert calls == [["codesign", "--force", "--deep", "--sign", "-", str(bundle)]]

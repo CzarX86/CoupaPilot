@@ -1,4 +1,6 @@
 import os
+import datetime
+import base64
 from pathlib import Path
 import pytest
 import pandas as pd
@@ -134,6 +136,41 @@ def test_window_minimum_width_gives_title_and_controls_room():
     assert small["height"] >= 700
 
 
+def test_single_instance_guard_blocks_a_second_desktop_process(monkeypatch):
+    from src.main import SingleInstanceGuard
+
+    bound = {"value": False}
+
+    class FakeSocket:
+        def setsockopt(self, *_args):
+            return None
+
+        def bind(self, *_args):
+            if bound["value"]:
+                raise OSError("already bound")
+            bound["value"] = True
+
+        def listen(self, _backlog):
+            return None
+
+        def close(self):
+            bound["value"] = False
+
+    monkeypatch.setattr("src.main.socket.socket", lambda *_args: FakeSocket())
+
+    first = SingleInstanceGuard()
+    second = SingleInstanceGuard()
+    try:
+        assert first.acquire() is True
+        assert second.acquire() is False
+    finally:
+        first.close()
+        second.close()
+
+    assert second.acquire() is True
+    second.close()
+
+
 def test_macos_coupa_url_uses_configured_default_handler(temp_db, monkeypatch):
     from src.main import TurboAPI
 
@@ -160,6 +197,129 @@ def test_open_coupa_po_strips_prefix_and_uses_default_browser(temp_db):
 
     assert result["success"] is True
     open_browser.assert_called_once_with("https://unilever.coupahost.com/order_headers/17138914")
+
+
+def test_powerbi_po_column_catalog_uses_monthly_cache_and_supports_refresh(temp_db):
+    from src.main import TurboAPI
+
+    api = TurboAPI(temp_db, "/tmp/downloads")
+    columns = [{"key": "po_number", "label": "PO number", "required": True}]
+    api.powerbi.discover_po_columns = MagicMock(return_value=columns)
+
+    first = api.get_powerbi_po_columns()
+    second = api.get_powerbi_po_columns()
+
+    assert first["success"] is True
+    assert first["refreshed"] is True
+    assert first["source"] == "provider"
+    assert second["refreshed"] is False
+    assert second["source"] == "cache"
+    assert api.powerbi.discover_po_columns.call_count == 1
+
+    stale_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=31)
+    temp_db.conn.execute(
+        "UPDATE powerbi_po_columns_cache SET updated_at = ? WHERE id = 1",
+        (stale_at.isoformat(timespec="seconds"),),
+    )
+    temp_db.conn.commit()
+
+    stale = api.get_powerbi_po_columns()
+    refreshed = api.refresh_powerbi_po_columns()
+
+    assert stale["refreshed"] is True
+    assert refreshed["refreshed"] is True
+    assert api.powerbi.discover_po_columns.call_count == 3
+
+
+def test_powerbi_po_column_metadata_failure_keeps_previous_catalog(temp_db):
+    from src.main import TurboAPI
+
+    api = TurboAPI(temp_db, "/tmp/downloads")
+    previous = [{
+        "key": "dataset_existing_field",
+        "label": "Existing field",
+        "table": "PurchaseOrder_Allocated",
+        "column": "Existing field",
+        "source": "PurchaseOrder_Allocated[Existing field]",
+    }]
+    temp_db.save_powerbi_po_columns(previous)
+    api.powerbi.discover_po_columns = MagicMock(return_value=[{"key": "new_field", "label": "New field"}])
+    api.powerbi.po_columns_source = MagicMock(return_value="provider-fallback")
+
+    result = api.refresh_powerbi_po_columns()
+
+    assert result["success"] is True
+    assert result["refreshed"] is False
+    assert result["warning"]
+    assert temp_db.get_powerbi_po_columns()["columns"] == previous
+
+
+def test_powerbi_po_column_selection_is_exposed_by_gui_api(temp_db):
+    from src.main import TurboAPI
+
+    api = TurboAPI(temp_db, "/tmp/downloads")
+
+    assert api.get_powerbi_po_column_selection() == {
+        "success": True,
+        "columns": [],
+        "updated_at": None,
+    }
+    saved = api.save_powerbi_po_column_selection(["po_number", "company_code"])
+    assert saved["success"] is True
+    assert api.get_powerbi_po_column_selection()["columns"] == ["po_number", "company_code"]
+
+
+def test_powerbi_input_preserves_selected_fields_and_normalizes_supplier(temp_db):
+    from src.main import TurboAPI
+
+    api = TurboAPI(temp_db, "/tmp/downloads")
+    api.powerbi.set_po_columns([
+        {"key": "po_number", "label": "PO number", "required": True},
+        {"key": "supplier_uu", "label": "Supplier UU", "default": True},
+        {"key": "management_unit_l3", "label": "Management Unit L3", "default": True},
+        {"key": "company_code", "label": "Company code", "default": True},
+        {"key": "commitment_value_eur", "label": "Commitment value (EUR)", "type": "currency", "default": True},
+    ])
+    rows = [
+        {"po_number": "PO-1", "supplier_uu": "LONG SUPPLIER NAME", "management_unit_l3": "Finance", "company_code": "1000", "legal_entity_code": "LE-1", "legal_entity_name": "Entity", "po_creation_date": "20260101", "commitment_value_eur": 20},
+        {"po_number": "PO-1", "supplier_uu": "UU", "management_unit_l3": "Digital", "company_code": "1000", "legal_entity_code": "LE-1", "legal_entity_name": "Entity", "po_creation_date": "20260101", "commitment_value_eur": 80},
+    ]
+
+    result = api._build_powerbi_input_rows(rows, [
+        "po_number", "supplier_uu", "management_unit_l3", "company_code", "commitment_value_eur",
+    ])
+
+    assert result[0]["SUPPLIER"] == "UU"
+    assert result[0]["MANAGEMENT_UNIT"] == "Digital | Finance"
+    assert result[0]["POWERBI_COMPANY_CODE"] == "1000"
+    assert result[0]["POWERBI_COMMITMENT_VALUE_EUR"] == 100
+
+
+def test_powerbi_input_keeps_supplier_codes_out_of_hierarchy_and_adds_crg_year(temp_db):
+    from src.main import TurboAPI
+
+    api = TurboAPI(temp_db, "/tmp/downloads")
+    rows = [{
+        "po_number": "PO-1",
+        "supplier_uu": "Example Supplier",
+        "supplier_gu": "WCSCGU123",
+        "supplier_s": "0050000001",
+        "crg": "R5600",
+        "year": "2026",
+        "po_creation_date": "2026-08-01",
+    }]
+
+    result = api._build_powerbi_input_rows(rows, ["po_number", "supplier_uu", "supplier_gu", "supplier_s"])
+    output = result[0]
+    separator_index = list(output).index("<|>")
+
+    assert output["SUPPLIER"] == "Example Supplier"
+    assert output["CRG"] == "R5600"
+    assert output["YEAR"] == "2026"
+    assert list(output).index("SUPPLIER_GU_CODE") < separator_index
+    assert list(output).index("SUPPLIER_S_CODE") < separator_index
+    assert list(output).index("CRG") > separator_index
+    assert list(output).index("YEAR") > separator_index
 
 
 def test_font_scale_setting_is_validated_and_persisted(temp_db, monkeypatch, tmp_path):
@@ -211,6 +371,15 @@ def test_python_portable_disables_startup_update_checks_by_default(temp_db, monk
     assert settings["auto_updates"] is False
 
 
+def test_application_version_is_exposed_to_the_gui(temp_db, monkeypatch, tmp_path):
+    monkeypatch.setattr("src.gui.api.Path.home", lambda: tmp_path)
+    monkeypatch.setattr(AppAPI, "_application_version", staticmethod(lambda: "1.0.0"))
+
+    settings = AppAPI(temp_db, "Downloads/CoupaAttachments").get_app_settings()
+
+    assert settings["version"] == "1.0.0"
+
+
 def test_import_file_csv_hierarchy_output_subdir(temp_db, tmp_path):
     csv_path = tmp_path / "hierarchy.csv"
     csv_path.write_text(
@@ -232,6 +401,76 @@ def test_import_file_csv_hierarchy_output_subdir(temp_db, tmp_path):
     ).fetchone()
     assert row is not None
     assert row["output_subdir"] == "Manpowergroup_Inc/2026/Q12026/Yellow_Wood"
+
+
+def test_import_file_hierarchy_order_keeps_po_as_final_folder(temp_db, tmp_path):
+    csv_path = tmp_path / "ordered-hierarchy.csv"
+    csv_path.write_text(
+        "PO_NUMBER;SUPPLIER;<|>;Year;Quarter\n"
+        "PO9001;Manpowergroup Inc.;;2026;Q12026\n",
+        encoding="utf-8",
+    )
+
+    api = AppAPI(temp_db, "/tmp/downloads")
+    result = api.import_file(str(csv_path), ["Year", "SUPPLIER", "Quarter"])
+
+    row = temp_db.conn.execute(
+        "SELECT output_subdir FROM po_downloads WHERE session_id = ? AND po_number = ?",
+        (result["session_id"], "PO9001"),
+    ).fetchone()
+    assert row["output_subdir"] == "2026/Manpowergroup_Inc/Q12026"
+
+
+def test_import_file_collapses_repeated_folder_underscores(temp_db, tmp_path):
+    csv_path = tmp_path / "folder-names.csv"
+    csv_path.write_text(
+        "PO_NUMBER;SUPPLIER;<|>;Service\n"
+        "PO9001;Integrated\\_Advertising\\_\\_\\_Creative\\_-\\_Agency\\_Fees;;TV___Cinema_including_Buyouts_excluding_celebrity_costs\n",
+        encoding="utf-8",
+    )
+
+    result = AppAPI(temp_db, "/tmp/downloads").import_file(
+        str(csv_path),
+        ["SUPPLIER", "Service"],
+    )
+    row = temp_db.conn.execute(
+        "SELECT output_subdir FROM po_downloads WHERE session_id = ?",
+        (result["session_id"],),
+    ).fetchone()
+
+    assert row["output_subdir"] == "Integrated_Advertising_Creative_-_Agency_Fees/TV_Cinema_including_Buyouts_excluding_celebrity_costs"
+
+
+def test_stage_dropped_file_creates_a_local_working_copy(temp_db, monkeypatch, tmp_path):
+    monkeypatch.setattr("src.gui.api.Path.home", lambda: tmp_path)
+    api = AppAPI(temp_db, str(tmp_path / "downloads"))
+    payload = b"PO_NUMBER;SUPPLIER\nPO100;ACME\n"
+    encoded = "data:text/csv;base64," + base64.b64encode(payload).decode("ascii")
+
+    result = api.stage_dropped_file("/external/path/input.csv", encoded)
+
+    assert result["success"] is True
+    staged = Path(result["path"])
+    assert staged.parent == tmp_path / ".contract_downloader" / "working"
+    assert staged.name.endswith("_input.csv")
+    assert staged.read_bytes() == payload
+
+
+def test_estimate_hierarchy_path_reports_long_paths_and_recommendations(temp_db, tmp_path):
+    csv_path = tmp_path / "long-hierarchy.csv"
+    csv_path.write_text(
+        "PO_NUMBER;SUPPLIER;<|>;LevelOne;LevelTwo\n"
+        f"PO9001;{'Supplier-' + 'x' * 90};;{'A' * 90};{'B' * 90}\n",
+        encoding="utf-8",
+    )
+
+    result = AppAPI(temp_db, str(tmp_path / ("downloads-" + "d" * 30))).estimate_hierarchy_path(
+        str(csv_path), ["Supplier", "LevelOne", "LevelTwo"]
+    )
+
+    assert result["success"] is True
+    assert result["safe"] is False
+    assert result["recommended_remove"]
 
 
 # ── Column mapping and grouped validation ────────────────────────────────

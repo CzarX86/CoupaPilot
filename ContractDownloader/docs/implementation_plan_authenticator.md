@@ -1,6 +1,6 @@
 # Implementation Plan – Authenticator Module
 
-> **Substituído (2026-08-02):** Este plano inicial, limitado ao Edge, foi substituído por [`authentication-architecture.md`](authentication-architecture.md). A implementação ativa está em `src/auth/`; `src/engine/authenticator.py` agora é uma facade de compatibilidade.
+> **Substituído (2026-08-12):** Não implementar este plano histórico. A versão oficial 1.0.0 está descrita em [`authentication-architecture.md`](authentication-architecture.md): `SecureSessionStore`, perfil corporativo existente do Edge, captura explícita e crawler Direct HTTP. `src/engine/authenticator.py` permanece apenas como facade de compatibilidade.
 
 ## Goal
 Create `src/engine/authenticator.py` that handles temporary Edge Selenium login, extracts session cookies, and returns them for the async HTTP engine.

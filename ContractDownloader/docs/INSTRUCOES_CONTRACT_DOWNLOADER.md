@@ -21,15 +21,24 @@ Não é necessário instalar Python, instalar bibliotecas ou executar como admin
 Somente na primeira abertura de uma pasta extraída, o Windows pode demorar alguns segundos para preparar os arquivos; as próximas aberturas pulam essa etapa.
 Durante os downloads, o processo auxiliar roda sem abrir uma janela de terminal; o painel de logs permanece dentro do aplicativo.
 
+Para uma distribuição com aparência nativa do Windows, use `ContractDownloader.exe` quando ele estiver disponível. Esse executável pode ser fixado na barra de tarefas e usa o ícone do aplicativo. O arquivo `Start-ContractDownloader.cmd` continua sendo o launcher da edição Python portátil.
+
+Para gerar esse executável em uma máquina Windows de desenvolvimento, execute `build_windows.cmd` na pasta do projeto. O resultado fica em `dist\ContractDownloader.exe`; o build deve ser feito no próprio Windows para incluir as dependências nativas corretas.
+
+O aplicativo mostra uma tela de carregamento durante a inicialização e impede duas instâncias simultâneas. Se ele já estiver aberto, a segunda tentativa informa isso e encerra com segurança.
+
 ## 3. Fazer o login
 
 Quando solicitado:
 
-1. O Contract Downloader detecta Edge/Chrome instalados e, em modo automático, usa o navegador padrão do sistema quando ele for suportado.
-2. Conclua o login do Coupa na janela do navegador dedicada ao aplicativo.
-3. Retorne ao Contract Downloader e aguarde a confirmação da sessão.
+1. Se todas as janelas do Edge estiverem fechadas, o app detecta automaticamente o perfil que contém `@unilever.com`.
+2. Se o app solicitar, feche todas as janelas do Microsoft Edge. O app apenas espera; ele nunca encerra o Edge à força.
+3. O WebDriver abre o perfil corporativo detectado, captura o SSO do Coupa e fecha somente a janela criada pelo app.
+4. Retorne ao Contract Downloader e aguarde a confirmação da sessão.
 
-O perfil dedicado é criado e reutilizado pelo aplicativo. Para escolher outro navegador, use **Settings**; isso não altera o navegador padrão do sistema nem os links externos.
+O perfil pessoal nunca é copiado, apagado ou alterado. A sessão fica no armazenamento seguro nativo do Windows ou macOS e o Edge não é aberto nas execuções seguintes enquanto o Coupa aceitar a sessão.
+
+O processamento oficial usa HTTP/2 com 11 workers e não abre browser por worker. Não há fallback automático para a versão legada.
 
 ## 4. Executar uma lista de POs
 

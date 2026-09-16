@@ -63,7 +63,8 @@ Baixar anexos de POs do Coupa com maxima velocidade (69.44 POs/min), resiliencia
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | pywebview sobre Tkinter | UI premium nativa, ~35MB RAM, sem admin, cross-platform | — Pending |
-| Edge Authenticator temporario | Selenium extrai cookies 1x, fecha browser, migra para httpx | — Pending |
+| AuthService com browser controlado | Selenium extrai cookies 1x em perfil exclusivo do app, fecha o browser e entrega a sessao ao pipeline HTTP; Edge e Chrome sao suportados | — Pending |
+| Navegador externo sob controle do SO | Links externos usam o launcher/default browser do sistema; o app nao gerencia essa preferencia | — Pending |
 | Network Benchmarker com sliders | Teste de latencia preenche recomendacoes; usuario valida manualmente | — Pending |
 | Fontes nativas do SO | Segoe UI / San Francisco — carregamento offline instantaneo | — Pending |
 | Self-Updater portatil | GitHub API → download em background → script atomico de replace | — Pending |

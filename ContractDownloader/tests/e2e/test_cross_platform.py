@@ -57,6 +57,8 @@ def test_clean_folder_part_replaces_slashes_and_whitespace() -> None:
     assert _clean_folder_part("Foo/Bar") == "Foo_Bar"
     assert _clean_folder_part("Foo\\Bar") == "Foo_Bar"
     assert _clean_folder_part("  Leading Trailing  ") == "Leading_Trailing"
+    assert _clean_folder_part(r"Integrated\_Advertising\_\_\_Creative\_-\_Agency\_Fees") == "Integrated_Advertising_Creative_-_Agency_Fees"
+    assert _clean_folder_part("TV___Cinema_including_Buyouts_excluding_celebrity_costs") == "TV_Cinema_including_Buyouts_excluding_celebrity_costs"
     assert _clean_folder_part("") == "Unknown"
     assert _clean_folder_part(".") == "Unknown"
     assert _clean_folder_part("nan") == "Unknown"

@@ -1,5 +1,8 @@
+import base64
+import binascii
 import json
 import os
+import re
 import sys
 import time
 import asyncio
@@ -18,12 +21,13 @@ from src.db.session_db import SessionDB, PODownload
 from src.engine.crawler import CoupaCrawler
 from src.engine.tls import system_ssl_context
 from src.auth import AuthService, AuthState
-from src.auth.browser import BrowserKind
+from src.auth.browser import BrowserInstallation, BrowserKind, EdgeDriverResolver
 
 
 class AppAPI:
+    MAX_STAGED_INPUT_BYTES = 100 * 1024 * 1024
     DEFAULT_SETTINGS = {
-        "concurrency": 4,
+        "concurrency": 11,
         "retry_attempts": 1,
         "auto_updates": True,
         "retention": "all",
@@ -37,6 +41,7 @@ class AppAPI:
     def __init__(self, db: SessionDB, default_download_dir: str):
         self.db = db
         self._settings_path = Path.home() / ".contract_downloader" / "gui_settings.json"
+        self._column_mapping_overrides: Dict[str, Dict[str, str]] = {}
         self.default_download_dir = self._load_download_root(default_download_dir)
         self._runtime_lock = threading.Lock()
         self.auth_service = AuthService()
@@ -66,7 +71,7 @@ class AppAPI:
                 settings.update(stored)
         except (OSError, ValueError):
             pass
-        settings["concurrency"] = max(1, min(8, int(settings.get("concurrency", 4))))
+        settings["concurrency"] = max(1, min(11, int(settings.get("concurrency", 11))))
         settings["retry_attempts"] = max(1, min(3, int(settings.get("retry_attempts", 1))))
         settings["auto_updates"] = bool(settings.get("auto_updates", True))
         if settings.get("retention") not in {"all", "10", "30", "90"}:
@@ -138,6 +143,7 @@ class AppAPI:
     def _mapping_for(self, filepath: str) -> Dict[str, str]:
         key = str(Path(filepath).expanduser().resolve())
         stored = self._load_column_mappings().get(key, {})
+        stored = {**stored, **self._column_mapping_overrides.get(key, {})}
         return {k: v for k, v in stored.items() if v}
 
     @staticmethod
@@ -218,6 +224,7 @@ class AppAPI:
         stored = self._load_column_mappings()
         key = str(path.expanduser().resolve())
         stored[key] = {"po": resolved["po"], "supplier": resolved["supplier"]}
+        self._column_mapping_overrides[key] = dict(stored[key])
         self._save_column_mappings(stored)
         validation = self.validate_input_file(str(path))
         return {"success": True, "mapping": stored[key], **validation}
@@ -226,13 +233,14 @@ class AppAPI:
         settings = self._read_settings()
         settings["download_root"] = self.default_download_dir
         settings["python_portable"] = self._is_python_portable()
+        settings["version"] = self._application_version()
         settings["auth_browsers"] = self.auth_service.browser_options(settings.get("auth_browser"))
         return settings
 
     def set_app_settings(self, values: Dict[str, Any]) -> Dict[str, Any]:
         current = self._read_settings()
         try:
-            current["concurrency"] = max(1, min(8, int(values.get("concurrency", current["concurrency"]))))
+            current["concurrency"] = max(1, min(11, int(values.get("concurrency", current["concurrency"]))))
             current["retry_attempts"] = max(1, min(3, int(values.get("retry_attempts", current["retry_attempts"]))))
         except (TypeError, ValueError):
             return {"success": False, "error": "Concurrency and retry values must be numeric."}
@@ -603,6 +611,36 @@ class AppAPI:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
+    def stage_dropped_file(self, filename: str, content: str) -> Dict[str, Any]:
+        """Persist a drag-and-dropped file when the WebView hides its path."""
+        raw_name = str(filename or "").replace("\x00", "").strip()
+        safe_name = re.split(r"[\\/]", raw_name)[-1].strip()
+        if not safe_name:
+            return {"success": False, "error": "The dropped file has no name."}
+        if Path(safe_name).suffix.lower() not in {".csv", ".xls", ".xlsx", ".xlsm"}:
+            return {"success": False, "error": "Unsupported file format. Use XLSX, XLSM, XLS or CSV."}
+
+        encoded = str(content or "")
+        if "," in encoded and encoded.lstrip().lower().startswith("data:"):
+            encoded = encoded.split(",", 1)[1]
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return {"success": False, "error": "The dropped file could not be read."}
+        if not payload:
+            return {"success": False, "error": "The dropped file is empty."}
+        if len(payload) > self.MAX_STAGED_INPUT_BYTES:
+            return {"success": False, "error": "The dropped file is too large."}
+
+        working_dir = Path.home() / ".contract_downloader" / "working"
+        try:
+            working_dir.mkdir(parents=True, exist_ok=True)
+            target = working_dir / f"drop_{time.time_ns()}_{os.getpid()}_{safe_name}"
+            target.write_bytes(payload)
+            return {"success": True, "path": str(target), "name": safe_name, "size": len(payload)}
+        except OSError as exc:
+            return {"success": False, "error": f"Could not stage the dropped file: {exc}"}
+
     def select_directory(self) -> str:
         """Open a native destination-folder dialog."""
         Path(self.default_download_dir).mkdir(parents=True, exist_ok=True)
@@ -657,11 +695,16 @@ class AppAPI:
             cookies=cookies,
             cookie_store=self.auth_service.store,
         )
+        with self._runtime_lock:
+            current = self._runtime.get(session_id)
+            if current:
+                current["download_started_at"] = time.time()
+                current["last_progress_at"] = current["download_started_at"]
         self._set_session_status(session_id, "RUNNING")
         self._append_log(
             session_id,
             "System",
-            f"Starting session {session_id} with {len(rows)} POs (workers={concurrency})",
+            f"Starting download of {len(rows)} purchase orders.",
         )
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -672,7 +715,7 @@ class AppAPI:
                 _check_runtime_stop(session_id, self._runtime, self._runtime_lock)
                 await _check_runtime_pause(session_id, self._runtime, self._runtime_lock)
 
-                self._append_log(session_id, "Info", f"Processing PO {po_number} ({company_code})")
+                self._append_log(session_id, "Info", f"Downloading documents for PO {po_number} ({company_code}).")
                 result = await crawler.process_po(po_number, company_code)
                 po_row = self.db.get_po(session_id, po_number)
                 po_status = (po_row or {}).get("status", "ERROR")
@@ -684,17 +727,22 @@ class AppAPI:
                         current["processed"] += 1
                         if failed:
                             current["errors"] += 1
+                        current["last_progress_at"] = time.time()
+                        company = current["company_stats"].setdefault(company_code, {"company_code": company_code, "processed": 0, "success": 0, "errors": 0})
+                        company["processed"] += 1
+                        company["errors" if failed else "success"] += 1
+                        elapsed = max(current["last_progress_at"] - current.get("download_started_at", current["last_progress_at"]), 0.1)
+                        current["last_speed"] = (current["processed"] / elapsed) * 60.0
 
                 if failed:
-                    diagnostic_log = result.get("diagnostic_log") or crawler.diagnostic_log_path
                     self._append_log(
                         session_id,
                         "Error",
-                        f"PO {po_number} failed: {(po_row or {}).get('error_message') or po_status} "
-                        f"[diagnostic_log={diagnostic_log}]",
+                        f"PO {po_number} could not be completed: {(po_row or {}).get('error_message') or po_status}.",
                     )
                 else:
-                    self._append_log(session_id, "Success", f"PO {po_number} completed")
+                    attachment_count = int((po_row or {}).get("attachment_count") or 0)
+                    self._append_log(session_id, "Success", f"PO {po_number} completed ({attachment_count} document(s)).")
                 return result
 
         try:
@@ -705,7 +753,7 @@ class AppAPI:
                     stopped = True
                     continue
                 if isinstance(result, Exception):
-                    self._append_log(session_id, "Error", f"Task error: {result}")
+                    self._append_log(session_id, "Error", "A download task could not be completed. The run will continue with the remaining POs.")
                     with self._runtime_lock:
                         current = self._runtime.get(session_id)
                         if current:
@@ -726,9 +774,10 @@ class AppAPI:
                     final_status = "FAILED"
                 if current:
                     current["status"] = final_status
+                    current["download_finished_at"] = time.time()
 
             self._set_session_status(session_id, final_status)
-            message = f"Session {session_id} finished with status: {final_status}"
+            message = f"Download finished: {processed - errors} successful, {errors} with errors."
             self._append_log(session_id, "System", message)
 
         finally:
@@ -743,6 +792,7 @@ class AppAPI:
                 if runtime:
                     runtime["status"] = "FAILED"
                     runtime["errors"] += 1
+                    runtime["download_finished_at"] = time.time()
             self._set_session_status(session_id, "FAILED")
             self._append_log(session_id, "Error", f"Fatal session error: {e}")
 
@@ -783,7 +833,16 @@ class AppAPI:
         except OSError as exc:
             return {"exists": True, "ready": False, "open_detected": True, "stable": False, "error": str(exc)}
 
-    def start_download(self, session_id: int, download_dir: str, concurrency: int = 11) -> Dict[str, Any]:
+    def start_download(
+        self,
+        session_id: int,
+        download_dir: str,
+        concurrency: int = 11,
+        hierarchy_order: Optional[List[str]] = None,
+        retry_attempts: int = 1,
+        _reserved: Any = None,
+        _source_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         try:
             session_id = int(session_id)
             download_dir = (download_dir or self.default_download_dir).strip() or self.default_download_dir
@@ -814,7 +873,13 @@ class AppAPI:
                     "paused": False,
                     "stop_requested": False,
                     "concurrency": concurrency,
+                    "download_dir": download_dir,
                     "latest_logs": [],
+                    "download_started_at": None,
+                    "download_finished_at": None,
+                    "last_speed": 0.0,
+                    "last_progress_at": None,
+                    "company_stats": {},
                 }
 
             self._set_session_status(session_id, "RUNNING")
@@ -838,14 +903,20 @@ class AppAPI:
             runtime = self._runtime.get(session_id)
 
         if runtime:
-            elapsed = max(time.time() - runtime.get("started_at", time.time()), 0.1)
+            now = time.time()
             processed = int(runtime.get("processed", 0))
             total = int(runtime.get("total", 0))
             errors = int(runtime.get("errors", 0))
-            speed = (processed / elapsed) * 60.0 if processed > 0 else 0.0
+            started_at = runtime.get("download_started_at")
+            finished_at = runtime.get("download_finished_at")
+            active_elapsed = max((finished_at or now) - started_at, 0.1) if started_at else 0.0
+            speed = (processed / active_elapsed) * 60.0 if processed > 0 and active_elapsed else 0.0
+            if finished_at:
+                speed = float(runtime.get("last_speed", speed))
             remaining = max(total - processed, 0)
             eta_seconds = int((remaining / speed) * 60) if speed > 0 else 0
             eta = time.strftime("%M:%S", time.gmtime(eta_seconds)) if speed > 0 else "--:--"
+            stalled_seconds = int(now - runtime.get("last_progress_at", now)) if runtime.get("last_progress_at") else 0
 
             with self._runtime_lock:
                 latest_logs = list(runtime.get("latest_logs", []))
@@ -859,6 +930,8 @@ class AppAPI:
                 "speed": speed,
                 "eta": eta,
                 "errors": errors,
+                "company_stats": list(runtime.get("company_stats", {}).values()),
+                "stalled_seconds": stalled_seconds if not finished_at else 0,
                 "latest_logs": latest_logs,
             }
 
@@ -882,6 +955,16 @@ class AppAPI:
         total = int(stats["total"] or 0)
         processed = int(stats["processed"] or 0)
         errors = int(stats["errors"] or 0)
+        company_rows = cursor.execute(
+            """
+            SELECT company_code,
+                   SUM(CASE WHEN status != 'PENDING' THEN 1 ELSE 0 END) AS processed,
+                   SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success,
+                   SUM(CASE WHEN status IN ('ERROR', 'SKIPPED_VERIFICATION_REQUIRED') THEN 1 ELSE 0 END) AS errors
+            FROM po_downloads WHERE session_id = ? GROUP BY company_code ORDER BY company_code
+            """,
+            (session_id,),
+        ).fetchall()
 
         return {
             "status": session_status,
@@ -890,6 +973,8 @@ class AppAPI:
             "speed": 0.0,
             "eta": "--:--",
             "errors": errors,
+            "company_stats": [dict(row) for row in company_rows if int(row["processed"] or 0) > 0],
+            "stalled_seconds": 0,
             "latest_logs": [],
         }
 
@@ -911,6 +996,22 @@ class AppAPI:
     def resume_download(self, session_id: int) -> Dict[str, Any]:
         try:
             session_id = int(session_id)
+            with self._runtime_lock:
+                runtime = self._runtime.get(session_id)
+                if not runtime:
+                    return {"success": False, "error": "Session not active."}
+                status = str(runtime.get("status") or "").upper()
+                download_dir = str(runtime.get("download_dir") or self.default_download_dir)
+                concurrency = int(runtime.get("concurrency", 11))
+            if status in {"STOPPED", "FAILED", "PARTIAL"}:
+                # A stopped worker has already exited. Starting a fresh worker
+                # is safe because the DB keeps successful POs out of PENDING.
+                result = self.start_download(session_id, download_dir, concurrency)
+                if result.get("success"):
+                    self._append_log(session_id, "System", "Run resumed; completed POs were preserved.")
+                return result
+            if status not in {"PAUSED", "RUNNING"}:
+                return {"success": False, "error": "This run cannot be resumed from its current state."}
             with self._runtime_lock:
                 runtime = self._runtime.get(session_id)
                 if not runtime:
@@ -1016,8 +1117,13 @@ class AppAPI:
 
     @staticmethod
     def _edge_driver_path() -> Optional[str]:
-        """Resolve the EdgeDriver Selenium will use without starting Edge."""
-        return AppAPI._driver_path("edge")
+        """Resolve the exact EdgeDriver selected by the authentication launcher."""
+        browser_path = AppAPI._find_edge()
+        if not browser_path:
+            return None
+        return EdgeDriverResolver.resolve(
+            BrowserInstallation(BrowserKind.EDGE, "Microsoft Edge", browser_path)
+        )
 
     @staticmethod
     def _chrome_driver_path() -> Optional[str]:
@@ -1115,29 +1221,92 @@ class AppAPI:
         except Exception as exc:
             check("Coupa sign-in browsers", "WARN", f"Could not detect supported browsers: {exc}")
 
-        # ---- App-owned sign-in profiles ----
+        # ---- Edge DevTools reuse / dedicated fallback ----
         try:
-            browser_options = self.auth_service.browser_options(self._read_settings().get("auth_browser"))
-            profiles = browser_options.get("profiles", {})
-            for kind in BrowserKind:
-                info = profiles.get(kind.value) if isinstance(profiles, dict) else None
-                label = f"{kind.value.title()} profile"
-                if isinstance(info, dict) and (info.get("exists") or info.get("registered")):
-                    check(label, "PASS", self._safe_user_path(str(info.get("path", ""))))
-                else:
-                    check(label, "PASS", f"App-owned profile will be created if {kind.value.title()} is selected")
-
-            selected = browser_options.get("selected")
-            selected_kind = BrowserKind(str(selected)) if selected else None
-            selected_info = profiles.get(selected_kind.value) if selected_kind and isinstance(profiles, dict) else None
-            if isinstance(selected_info, dict) and selected_info.get("exists"):
-                check("Coupa sign-in profile", "PASS", self._safe_user_path(str(selected_info.get("path", ""))))
+            debugger_address = self.auth_service.edge_devtools_connector.discover()
+            if debugger_address:
+                check(
+                    "Edge authentication strategy",
+                    "PASS",
+                    f"Existing Edge session available through DevTools at {debugger_address}",
+                )
             else:
-                check("Coupa sign-in profile", "PASS", "Created on first Coupa sign-in")
+                check(
+                    "Edge authentication strategy",
+                    "PASS",
+                    "No DevTools endpoint detected; the app will use its dedicated Edge profile",
+                )
         except Exception as exc:
-            check("Edge profile", "WARN", f"Could not inspect the app-owned profile: {exc}")
-            check("Chrome profile", "WARN", f"Could not inspect the app-owned profile: {exc}")
-            check("Coupa sign-in profile", "WARN", f"Could not inspect the app-owned profile: {exc}")
+            check("Edge authentication strategy", "WARN", f"Could not inspect DevTools availability: {exc}")
+
+        # ---- Edge processes and profile ownership ----
+        try:
+            edge_environment = self.auth_service.edge_profile_detector.environment_status()
+            process_count = edge_environment.get("edge_process_count")
+            main_running = bool(edge_environment.get("main_process_running"))
+            blocking = bool(edge_environment.get("blocking"))
+            markers = tuple(edge_environment.get("markers") or ())
+            owner_pid = edge_environment.get("owner_pid")
+            if blocking or main_running:
+                process_detail = "live profile lock" if blocking else "main Edge process"
+                if owner_pid:
+                    process_detail += f" (PID {owner_pid})"
+                check("Edge profile availability", "WARN", f"Blocked by {process_detail}; quit Edge with ⌘Q")
+            elif process_count is None:
+                check(
+                    "Edge profile availability",
+                    "WARN",
+                    "No live profile owner found, but macOS process enumeration was unavailable",
+                )
+            else:
+                helper_detail = (
+                    f"; {process_count} non-blocking Edge helper/background process(es) detected"
+                    if isinstance(process_count, int) and process_count
+                    else ""
+                )
+                stale_detail = f"; stale markers ignored: {', '.join(markers)}" if markers else ""
+                check("Edge profile availability", "PASS", f"No live profile owner{helper_detail}{stale_detail}")
+        except Exception as exc:
+            check("Edge profile availability", "WARN", f"Could not inspect Edge processes and locks: {exc}")
+
+        # ---- Existing corporate Edge profile ----
+        try:
+            detection = self.auth_service.edge_profile_detector.detect()
+            if detection.state == "profile_detected" and detection.selected:
+                available = ", ".join(detection.available_profiles) or "none"
+                check(
+                    "Edge profile",
+                    "PASS",
+                    f"{detection.selected.profile_name}; "
+                    f"available={available}; "
+                    f"root={self._safe_user_path(str(detection.selected.user_data_dir))}",
+                )
+            elif detection.state == "edge_must_be_closed":
+                check("Edge profile", "WARN", "Quit Microsoft Edge with ⌘Q before session capture")
+            else:
+                check("Edge profile", "WARN", detection.message)
+        except Exception as exc:
+            check("Edge profile", "WARN", f"Could not inspect the existing work profile: {exc}")
+
+        # ---- Native secure session storage ----
+        try:
+            health_check = getattr(self.auth_service.store, "health", None)
+            if health_check:
+                health = health_check()
+                backend = str(health.get("backend") or "secure storage")
+                if health.get("readable"):
+                    presence = "Coupa session present" if health.get("has_session") else "no Coupa session stored"
+                    check("Secure session storage", "PASS", f"{backend} is accessible; {presence}")
+                else:
+                    check(
+                        "Secure session storage",
+                        "FAIL",
+                        f"{backend} is not readable: {health.get('error') or 'unknown error'}",
+                    )
+            else:
+                check("Secure session storage", "WARN", "Storage backend does not expose a health check")
+        except Exception as exc:
+            check("Secure session storage", "FAIL", f"Could not verify secure storage: {exc}")
 
         # ---- Coupa session ----
         try:
@@ -1152,6 +1321,26 @@ class AppAPI:
                 check("Coupa session", "WARN", "Cached session expired; re-authentication is required")
         except Exception as exc:
             check("Coupa session", "WARN", f"Could not validate session: {exc}")
+
+        # ---- Last structured authentication event ----
+        try:
+            latest = self.auth_service.latest_diagnostic()
+            trace_path = self._safe_user_path(str(self.auth_service.diagnostic_log_path))
+            if latest:
+                state = str(latest.get("state") or latest.get("event") or "unknown")
+                previous = str(latest.get("previous_state") or "unknown")
+                elapsed = latest.get("elapsed_ms")
+                message = str(latest.get("message") or "")
+                trace_status = "FAIL" if state == "error" else "WARN" if state == "action_required" else "PASS"
+                check(
+                    "Last authentication event",
+                    trace_status,
+                    f"{previous} -> {state}; elapsed={elapsed}ms; {message}; log={trace_path}",
+                )
+            else:
+                check("Last authentication event", "WARN", f"No authentication trace recorded yet; log={trace_path}")
+        except Exception as exc:
+            check("Last authentication event", "WARN", f"Could not read authentication trace: {exc}")
 
         # ---- Python portable edition ----
         if self._is_python_portable():
@@ -1497,6 +1686,7 @@ class AppAPI:
                 return "Unknown"
             text = text.replace("/", "_").replace("\\", "_")
             text = "_".join(text.split()).strip("._")
+            text = re.sub(r"_+", "_", text)
             return text or "Unknown"
 
         reserved_names = {"con", "prn", "aux", "nul"} | {f"com{index}" for index in range(1, 10)} | {f"lpt{index}" for index in range(1, 10)}
@@ -1531,6 +1721,8 @@ class AppAPI:
                 reasons = []
                 if "/" in raw_value or "\\" in raw_value:
                     reasons.append("contains a path separator ('/' or backslash); it will be replaced with '_' in the folder name")
+                if re.search(r"_+", raw_value):
+                    reasons.append("contains repeated underscores; they will collapse to one '_' in the folder name")
                 if ".." in raw_value:
                     reasons.append("contains a traversal sequence")
                 if stem in reserved_names:
@@ -2229,7 +2421,7 @@ class AppAPI:
             "message": "Safe repairs applied. The original file was backed up.",
         }
 
-    def import_file(self, filepath: str) -> Dict[str, Any]:
+    def import_file(self, filepath: str, hierarchy_order: Optional[List[str]] = None) -> Dict[str, Any]:
         import re
         from src.engine.input_schema import canonicalize_po_value, clean_scalar, columns_of_dataframe, detect_po_parts, is_excel_numeric_coercion, is_placeholder_po, is_placeholder_supplier, is_valid_canonical_po, normalize_po_value, normalize_supplier_value, resolve_data_mapping, resolve_mapping
         try:
@@ -2247,6 +2439,7 @@ class AppAPI:
                     text = 'Unknown'
                 text = text.replace('/', '_').replace('\\', '_')
                 text = '_'.join(text.split())
+                text = re.sub(r'_+', '_', text)
                 text = text.strip('._')
                 return text or 'Unknown'
 
@@ -2309,11 +2502,18 @@ class AppAPI:
                 po_val = str(row[po_col]).strip()
                 company_val = str(row[company_col]).strip()
                 if po_val and po_val.lower() != 'nan' and company_val and company_val.lower() != 'nan':
-                    # Supplier is always the first folder level; optional
-                    # hierarchy columns come next (PO stays at the file level).
-                    parts = [clean_folder_part(company_val)]
-                    if has_hierarchy_data and hierarchy_cols:
-                        parts.extend(clean_folder_part(row.get(col, '')) for col in hierarchy_cols)
+                    available_hierarchy = list(dict.fromkeys([str(company_col), *hierarchy_cols] if has_hierarchy_data else [str(company_col)]))
+                    requested = list(dict.fromkeys(str(value) for value in (hierarchy_order or [])))
+                    ordered_hierarchy = [column for column in requested if column in available_hierarchy]
+                    ordered_hierarchy.extend(column for column in available_hierarchy if column not in ordered_hierarchy)
+                    parts = []
+                    seen_parts = set()
+                    for column in ordered_hierarchy:
+                        part = clean_folder_part(row.get(column, company_val) if column != str(company_col) else company_val)
+                        if part.casefold() in seen_parts:
+                            continue
+                        parts.append(part)
+                        seen_parts.add(part.casefold())
                     output_subdir = PurePosixPath(*parts).as_posix()
 
                     self.db.add_po(PODownload(
@@ -2333,6 +2533,48 @@ class AppAPI:
 
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def estimate_hierarchy_path(self, filepath: str, hierarchy_order: Optional[List[str]] = None, download_dir: Optional[str] = None) -> Dict[str, Any]:
+        """Estimate the longest PO folder path before any download starts."""
+        try:
+            from src.engine.input_schema import columns_of_dataframe, clean_scalar, resolve_data_mapping
+            frame = self._read_input_dataframe(Path(filepath))
+            mapping, _ = resolve_data_mapping(frame, columns_of_dataframe(frame), self._mapping_for(filepath))
+            po_col, supplier_col = mapping.get("po"), mapping.get("supplier")
+            if not po_col or not supplier_col:
+                return {"success": False, "error": "PO and Supplier columns are required."}
+            columns = [str(column) for column in frame.columns]
+            separator = next((column for column in columns if column.strip() == "<|>"), None)
+            optional = columns[columns.index(separator) + 1:] if separator in columns else [column for column in columns if column not in {str(po_col), str(supplier_col)}]
+            available = [str(supplier_col), *optional]
+            order = [str(value) for value in (hierarchy_order or []) if str(value) in available]
+            order.extend(column for column in available if column not in order)
+            root = str(Path(download_dir or self.default_download_dir).expanduser())
+            def path_length(columns: List[str]) -> tuple[int, Optional[int]]:
+                longest, longest_row = 0, None
+                for row_number, row in frame.iterrows():
+                    po = clean_scalar(row.get(po_col, ""))
+                    if not po:
+                        continue
+                    parts = [clean_scalar(row.get(column, "Unknown")) or "Unknown" for column in columns]
+                    length = len(str(Path(root).joinpath(*parts, po)))
+                    if length > longest:
+                        longest, longest_row = length, int(row_number) + 2
+                return longest, longest_row
+
+            limit = 240
+            original_max, max_row = path_length(order)
+            recommended_remove = []
+            reduced = list(order)
+            reduced_max = original_max
+            while reduced_max > limit and len(reduced) > 1:
+                removable = max(reduced[1:], key=lambda column: max((len(clean_scalar(row.get(column, "")) or "Unknown") for _, row in frame.iterrows()), default=0))
+                recommended_remove.append(removable)
+                reduced.remove(removable)
+                reduced_max, _ = path_length(reduced)
+            return {"success": True, "max_path_length": original_max, "limit": limit, "row": max_row, "recommended_remove": recommended_remove, "hierarchy": order, "safe": original_max <= limit, "safe_after_recommendation": reduced_max <= limit}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
 
     def _session_summary(self, session_id: int) -> Dict[str, int]:
         cursor = self.db.conn.cursor()
@@ -2387,6 +2629,68 @@ class AppAPI:
             'pos': pos
         }
 
+    def _get_lab_relationship_powerbi(self, po_numbers: list[str]) -> Optional[Dict[str, Any]]:
+        """Return optional Power BI enrichment for the relationship view."""
+        return None
+
+    def get_lab_relationships(self, session_id: Optional[int] = None) -> Dict[str, Any]:
+        """Return the experimental contract -> PO -> invoice relationship view."""
+        from src.reports.lab_relationships import build_lab_relationships
+
+        cursor = self.db.conn.cursor()
+        session_rows = cursor.execute(
+            """
+            SELECT s.id, s.input_file, s.status, s.created_at,
+                   COUNT(p.id) AS total_pos
+            FROM sessions s
+            LEFT JOIN po_downloads p ON p.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id DESC
+            """
+        ).fetchall()
+        sessions = [dict(row) for row in session_rows]
+        if not sessions:
+            return {"success": True, "session": None, "sessions": [], **build_lab_relationships([], [])}
+
+        try:
+            selected_id = int(session_id) if session_id is not None else int(sessions[0]["id"])
+        except (TypeError, ValueError):
+            selected_id = int(sessions[0]["id"])
+        if not any(int(item["id"]) == selected_id for item in sessions):
+            selected_id = int(sessions[0]["id"])
+
+        pos = [dict(row) for row in cursor.execute(
+            "SELECT * FROM po_downloads WHERE session_id = ? ORDER BY po_number",
+            (selected_id,),
+        ).fetchall()]
+        attachments = [dict(row) for row in cursor.execute(
+            "SELECT * FROM po_attachments WHERE session_id = ? ORDER BY po_number, id",
+            (selected_id,),
+        ).fetchall()]
+        session = self.db.get_session(selected_id)
+        powerbi_data = None
+        powerbi_error = None
+        try:
+            powerbi_data = self._get_lab_relationship_powerbi(
+                [str(row.get("po_number") or "") for row in pos]
+            )
+        except Exception as exc:
+            powerbi_error = str(exc)
+        view = build_lab_relationships(pos, attachments, powerbi_data)
+        if powerbi_error:
+            view["validation"].append({
+                "code": "powerbi_relationship_unavailable",
+                "severity": "warning",
+                "message": f"Power BI relationship data is unavailable: {powerbi_error}",
+            })
+            view["summary"]["warnings"] += 1
+        return {
+            "success": True,
+            "session": session,
+            "sessions": sessions,
+            **view,
+        }
+
     def confirm_and_retry_company(self, session_id: int, company_code: str) -> Dict[str, Any]:
         try:
             cursor = self.db.conn.cursor()
@@ -2421,6 +2725,11 @@ class AppAPI:
                 metadata_repository.list_po_metadata(session_id),
                 metadata_repository.list_line_metadata(session_id),
             )
+            from src.reports.attachment_relationships import build_attachment_relationships
+            relationships = build_attachment_relationships(self.db.list_po_attachments(session_id))
+            if relationships:
+                with pd.ExcelWriter(dest_filepath, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                    pd.DataFrame(relationships).to_excel(writer, sheet_name="ATTACHMENT_RELATIONSHIPS", index=False)
             return {'success': True, 'filepath': dest_filepath}
         except Exception as e:
             return {'success': False, 'error': str(e)}

@@ -47,7 +47,12 @@
 
 ### Authentication
 
-- [ ] **AUTH-01**: Edge Authenticator — ao clicar "Connect to Coupa", abre Edge temporario via Selenium para login, captura cookies de sessao, fecha browser e migra autenticacao para engine HTTP assincrona.
+- [ ] **AUTH-01**: Browser-assisted Authenticator — ao clicar "Connect to Coupa", abre um browser Chromium suportado via Selenium em perfil exclusivo do aplicativo, permite login manual, captura cookies de sessao, fecha o browser e migra autenticacao para a engine HTTP assincrona.
+- [ ] **AUTH-02**: Auth state precisa distinguir rapidamente sessao valida, expirada, ausente e indisponivel sem apagar ou invalidar o cache por falha temporaria de rede.
+- [ ] **AUTH-03**: GUI e CLI devem usar uma politica unica de cache e validacao; o worker CLI nao abre um segundo browser silenciosamente quando executado pela GUI.
+- [ ] **AUTH-04**: Edge e Chrome instalados devem ser detectados e suportados sem exigir que o usuario informe diretorios de perfil; o perfil exclusivo do aplicativo e o padrao.
+- [ ] **AUTH-05**: Links Coupa externos devem continuar sendo abertos pelo launcher/default browser configurado no sistema operacional, sem que o aplicativo imponha Safari, Edge ou Chrome.
+- [x] **AUTH-06**: Em modo automático, o Contract Downloader deve usar o navegador padrão do sistema quando ele for Edge/Chrome, permitir override de navegador somente nas configurações do aplicativo, registrar o perfil dedicado por navegador e solicitar login manual apenas no primeiro uso ou após expiração.
 
 ### Traffic Control
 
@@ -90,15 +95,21 @@
 | UI-01 | Phase 4 | Pending |
 | NET-01 | Phase 3 | Pending |
 | NET-02 | Phase 3 | Pending |
-| AUTH-01 | Phase 5 | Pending |
+| AUTH-01 | Phase 7 | Pending |
+| AUTH-02 | Phase 7 | Pending |
+| AUTH-03 | Phase 7 | Pending |
+| AUTH-04 | Phase 7 | Pending |
+| AUTH-05 | Phase 7 | Pending |
+| AUTH-06 | Phase 8 | Complete |
 | TRAF-01 | Phase 5 | Pending |
 | UPDT-01 | Phase 5 | Pending |
 | PLAT-01 | Phase 6 | Pending |
 | PARS-01 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 17 total
-- Mapped to phases: 17
+
+- requirements: 22 total (17 original v1 + 5 architecture refinements; AUTH-01 is refined in Phase 7)
+- Mapped to phases: 22
 - Unmapped: 0
 
 ---

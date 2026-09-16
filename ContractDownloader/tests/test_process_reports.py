@@ -2,6 +2,7 @@ import pytest
 from openpyxl import load_workbook
 
 from process_all_pos import export_original_like_excel_report, read_input_dataframe
+from process_all_pos import prepare_in_place_retry
 from src.db.session_db import PODownload, SessionDB
 
 
@@ -73,3 +74,29 @@ def test_report_preserves_input_columns_and_updates_retry_result(temp_db, tmp_pa
     assert retry_row[status_index] == "ERROR"
     assert retry_row[error_index] == "Retry failed again"
     assert retry_row[timestamp_index] == second_timestamp
+
+
+def test_report_contains_cross_po_attachment_relationships(temp_db, tmp_path):
+    session_id = temp_db.create_session("input.csv")
+    temp_db.add_po(PODownload(session_id, "PO-1", "Supplier A", status="SUCCESS"))
+    temp_db.add_po(PODownload(session_id, "PO-2", "Supplier B", status="SUCCESS"))
+    for po in ("PO-1", "PO-2"):
+        temp_db.record_po_attachment(
+            session_id, po, "shared-sow.pdf", sha256="same-content", size_bytes=10
+        )
+    report_path = tmp_path / "report.xlsx"
+    export_original_like_excel_report(temp_db, session_id, str(report_path))
+    workbook = load_workbook(report_path, read_only=True)
+    assert "ATTACHMENT_RELATIONSHIPS" in workbook.sheetnames
+    rows = list(workbook["ATTACHMENT_RELATIONSHIPS"].iter_rows(values_only=True))
+    assert rows[0][:3] == ("MATCH_TYPE", "MATCH_KEY", "PO_COUNT")
+    assert rows[1][:3] == ("SHA256", "same-content", 2)
+
+
+def test_in_place_retry_can_target_one_supplier(temp_db):
+    session_id = temp_db.create_session("input.csv")
+    temp_db.add_po(PODownload(session_id, "PO-1", "CC-1", status="ERROR", supplier_name="Supplier A"))
+    temp_db.add_po(PODownload(session_id, "PO-2", "CC-2", status="ERROR", supplier_name="Supplier B"))
+    assert prepare_in_place_retry(temp_db, session_id, supplier="Supplier A", errors_only=True) == 1
+    assert temp_db.get_po(session_id, "PO-1")["status"] == "PENDING"
+    assert temp_db.get_po(session_id, "PO-2")["status"] == "ERROR"

@@ -23,6 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / "dist"
 PRODUCT_NAME = "Contract Downloader"
 PRODUCT_SLUG = "ContractDownloader"
+PRODUCT_VERSION = (PROJECT_ROOT / ".version").read_text(encoding="utf-8").strip() if (PROJECT_ROOT / ".version").exists() else "1.0.0"
 BUNDLE_NAME = "ContractDownloader-python-portable"
 BUNDLE_DIR = DIST_DIR / BUNDLE_NAME
 RUNTIME_DIR = BUNDLE_DIR / "runtime"
@@ -182,6 +183,7 @@ except Exception:
             {
                 "format": 1,
                 "application": PRODUCT_NAME,
+                "version": PRODUCT_VERSION,
                 "python": PYTHON_VERSION,
                 "architecture": "x86_64",
                 "automatic_update_check_default": False,

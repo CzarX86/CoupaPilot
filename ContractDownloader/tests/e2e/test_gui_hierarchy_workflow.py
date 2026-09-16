@@ -1,4 +1,4 @@
-"""E2E coverage for the isolated hierarchy sorter and final journey step."""
+"""E2E coverage for the isolated hierarchy sorter and final folder approval."""
 
 from __future__ import annotations
 
@@ -58,9 +58,9 @@ def hierarchy_page(
             page.wait_for_timeout(900)
             page.locator("#file-input").set_input_files(str(input_path))
             page.wait_for_timeout(800)
-            page.click("#btn-next-input")
+            page.click("#journey-top-action")
             page.wait_for_selector("#validation-feedback:not([hidden])")
-            page.click("#btn-next-hierarchy")
+            page.click("#journey-top-action")
             page.wait_for_selector("#hierarchy-sortable > li[data-column]")
             try:
                 yield page, page_errors
@@ -76,7 +76,6 @@ def hierarchy_dom_order(page: Page) -> list[str]:
     """Return fixed and reorderable levels in their visible DOM order."""
     return page.evaluate(
         """() => [
-            document.querySelector('[data-fixed="supplier"]').dataset.fixed,
             ...[...document.querySelectorAll('#hierarchy-sortable > li[data-column]')]
                 .map(node => node.dataset.column),
             document.querySelector('[data-fixed="po"]').dataset.fixed,
@@ -101,11 +100,11 @@ def test_sortable_dependency_is_pinned_local_and_licensed() -> None:
 def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: str) -> None:
     with hierarchy_page(tmp_path, f"hierarchy-drag-{browser_name}", browser_name) as (page, page_errors):
         movable = page.locator("#hierarchy-sortable > li[data-column]")
-        assert movable.count() == 2
+        assert movable.count() == 3
         assert page.evaluate("window.Sortable && window.Sortable.version") == "1.15.7"
 
-        drag_handle = movable.nth(0).locator(".drag-handle")
-        last_item = movable.nth(1)
+        drag_handle = page.locator('#hierarchy-sortable > li[data-column="Department"] .drag-handle')
+        last_item = movable.nth(2)
         handle_box = drag_handle.bounding_box()
         last_box = last_item.bounding_box()
         assert handle_box is not None and last_box is not None
@@ -122,7 +121,7 @@ def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: st
         )
         page.mouse.up()
 
-        assert hierarchy_dom_order(page) == ["supplier", "Department", "Region", "po"]
+        assert hierarchy_dom_order(page) == ["SUPPLIER", "Region", "Department", "po"]
         assert "drag" in page.locator("#hierarchy-reorder-status").inner_text().lower()
         assert page.locator(".hierarchy-drag-fallback, .hierarchy-ghost, .hierarchy-chosen").count() == 0
         assert not page_errors, page_errors
@@ -130,10 +129,10 @@ def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: st
 
 def test_reorder_buttons_are_a_reliable_keyboard_alternative(tmp_path: Path) -> None:
     with hierarchy_page(tmp_path, "hierarchy-buttons") as (page, page_errors):
-        first = page.locator('#hierarchy-sortable > li[data-column="Region"]')
+        first = page.locator('#hierarchy-sortable > li[data-column="SUPPLIER"]')
         first.locator('[data-move-direction="down"]').click()
 
-        assert hierarchy_dom_order(page) == ["supplier", "Department", "Region", "po"]
+        assert hierarchy_dom_order(page) == ["Department", "SUPPLIER", "Region", "po"]
         assert page.locator('#hierarchy-sortable > li[data-column="Department"] [data-move-direction="up"]').is_disabled()
         assert page.locator('#hierarchy-sortable > li[data-column="Region"] [data-move-direction="down"]').is_disabled()
         assert not page_errors, page_errors
@@ -146,26 +145,22 @@ def test_hierarchy_disable_survives_revalidation(tmp_path: Path) -> None:
         page.locator('[data-journey-back="2"]').click()
         page.click("#btn-validate-file")
         page.wait_for_timeout(250)
-        page.click("#btn-next-hierarchy")
+        page.click("#journey-top-action")
         page.wait_for_selector("#hierarchy-disabled:not([hidden])")
         assert page.locator('[data-column="Region"]').count() == 0
         assert page.locator('[data-reenable-column="Region"]').count() == 1
         assert not page_errors, page_errors
 
 
-def test_final_journey_step_has_a_defined_title(tmp_path: Path) -> None:
-    with hierarchy_page(tmp_path, "journey-step-five") as (page, page_errors):
-        page.click("#btn-next-destination")
-        page.click("#btn-choose-dir")
-        page.wait_for_timeout(250)
-        page.click("#btn-next-review")
-        page.wait_for_timeout(250)
+def test_final_folder_approval_replaces_review_step(tmp_path: Path) -> None:
+    with hierarchy_page(tmp_path, "final-folder-approval") as (page, page_errors):
+        assert page.locator('[data-journey-step="4"]').count() == 0
+        assert page.locator('[data-journey-panel="4"]').count() == 0
+        assert page.locator("#folder-approval").is_visible()
+        assert not page.locator("#btn-start-run").is_visible()
+        assert page.locator("#journey-top-action").inner_text() == "Start download"
+        assert page.locator("#journey-top-action").is_disabled()
 
-        title = page.locator("#journey-title").inner_text().strip()
-        indicator = page.locator('[data-journey-step="5"] span').inner_text().strip()
-        assert title
-        assert indicator
-        assert "undefined" not in title.lower()
-        assert "undefined" not in indicator.lower()
-        assert page.locator('[data-journey-step="5"]').is_enabled()
+        page.locator("#folder-approval").check()
+        assert page.locator("#journey-top-action").is_enabled()
         assert not page_errors, page_errors

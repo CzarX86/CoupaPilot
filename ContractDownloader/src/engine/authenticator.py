@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -66,9 +67,15 @@ def clear_cached_authentication(*, remove_app_profile: bool = False) -> Dict[str
     try:
         result = _store().clear()
         if remove_app_profile:
-            profiles = BrowserProfileManager()
-            profiles.legacy_edge_profile = Path(EDGE_AUTH_PROFILE_DIR)
-            result["removed"] = [*result.get("removed", []), *profiles.clear(BrowserKind.EDGE)]
+            # This compatibility function is allowed to remove only the
+            # explicitly named legacy app-owned profile. Never enumerate or
+            # delete another Edge profile from the user's machine.
+            profile = Path(EDGE_AUTH_PROFILE_DIR)
+            if profile.exists():
+                if BrowserProfileManager.is_locked(profile) and not BrowserProfileManager.clear_stale_lock(profile):
+                    raise RuntimeError("Close the legacy Contract Downloader sign-in browser before resetting it.")
+                shutil.rmtree(profile)
+                result["removed"] = [*result.get("removed", []), profile.name]
         return result
     except (CookieStoreError, RuntimeError) as exc:
         return {"success": False, "error": str(exc)}

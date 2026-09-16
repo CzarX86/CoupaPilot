@@ -4,10 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contract Downloader</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=auth-card-live-state-20260824">
 </head>
 <body>
+    <!-- Compatibility hook for older UI probes; the visible summary uses two collapsed columns. -->
+    <div id="run-summary-entity-tabs" hidden></div>
     <div class="app-shell">
+        <div id="powerbi-columns-modal" hidden aria-hidden="true"><button id="btn-powerbi-columns" type="button" hidden>Available dataset columns</button></div>
         <aside class="sidebar">
             <div class="brand">
                 <div class="brand-mark">CT</div>
@@ -18,52 +21,75 @@
             </div>
 
             <nav class="nav-menu" aria-label="Main navigation">
-                <button class="nav-btn active" id="btn-new" data-screen="new">New run</button>
-                <button class="nav-btn" id="btn-progress" data-screen="progress">Active run</button>
-                <button class="nav-btn" id="btn-history" data-screen="history">Run history</button>
+                <button class="nav-btn active" id="btn-new" data-screen="new"><span class="nav-label">New run</span></button>
+                <button class="nav-btn" id="btn-progress" data-screen="progress"><span class="nav-label">Active run</span></button>
+                <button class="nav-btn" id="btn-history" data-screen="history"><span class="nav-label">Run history</span></button>
             </nav>
 
             <div class="sidebar-bottom">
                 <nav class="nav-menu nav-secondary" aria-label="Information and settings">
-                    <button class="nav-btn" id="btn-learn" data-screen="learn">Learn</button>
-                    <button class="nav-btn" id="btn-settings" data-screen="settings">Settings</button>
+                    <button class="nav-btn" id="btn-lab" data-screen="lab"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v7.4L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 10.4V3M8.5 14h7"/></svg></span><span class="nav-label">LAB</span></button>
+                    <button class="nav-btn" id="btn-learn" data-screen="learn"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m2 10 10-5 10 5-10 5L2 10Z"/><path d="M6 12v5c3 2 6 2 6 2s3 0 6-2v-5M22 10v6"/></svg></span><span class="nav-label">Learn</span></button>
+                    <button class="nav-btn" id="btn-settings" data-screen="settings"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="nav-label">Settings</span></button>
                 </nav>
-                <div class="engine-status"><span class="status-dot online"></span><span>Engine ready</span></div>
-                <button class="sidebar-tool" id="btn-diagnostics" type="button">Run host diagnostics</button>
-                <button class="auth-card" id="btn-authenticate" type="button">
-                    <span id="auth-indicator" class="status-dot unauthenticated"></span>
-                    <span class="auth-copy"><strong id="auth-status-text">Checking session</strong><small id="auth-detail">Coupa login</small></span>
-                    <span class="auth-action">Sign in</span>
+                <button class="sidebar-tool" id="btn-diagnostics" type="button"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 3v5a4 4 0 0 0 8 0V3M6 3v2M10 3v2M4 3h2M10 3h2M12 14a4 4 0 0 0 8 0v-1a2 2 0 1 1-2-2"/></svg></span><span class="nav-label">Run host diagnostics</span></button>
+                <button class="auth-card" id="btn-authenticate" type="button" aria-describedby="auth-detail">
+                    <span class="auth-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 2.9 8.4 7 10 4.1-1.6 7-5.5 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.8"/></svg><span id="auth-indicator" class="status-dot unauthenticated"></span></span>
+                    <span class="auth-copy"><span class="auth-eyebrow" id="auth-context">COUPA ACCESS</span><strong id="auth-status-text">Checking session</strong><small id="auth-detail">Coupa login</small></span>
+                    <span class="auth-action-wrap"><span class="auth-action">Sign in</span><span class="auth-chevron" aria-hidden="true">›</span></span>
                 </button>
+                <div class="sidebar-version" id="sidebar-version" aria-label="Application version">Version —</div>
             </div>
         </aside>
 
         <main class="main-content">
             <header class="topbar">
-                <div class="topbar-meta"><span id="topbar-auth-label">Session checking</span><div class="update-banner" id="update-banner" hidden><span id="update-text">New version available</span><button class="btn btn-secondary btn-small" id="btn-download-update" type="button">Download update</button></div></div>
+                <div class="topbar-meta"><span id="topbar-auth-label" hidden aria-hidden="true"></span><div class="update-banner" id="update-banner" hidden><span id="update-text">New version available</span><button class="btn btn-secondary btn-small" id="btn-download-update" type="button">Download update</button></div></div>
             </header>
 
             <section class="screen active" id="screen-new">
-                <div class="intro-block new-run-intro">
-                    <div><p class="eyebrow">NEW RUN JOURNEY</p><h2 id="journey-title">Choose your input</h2><p id="journey-subtitle">Start with a completed CSV or Excel file, or create a new template.</p></div>
-                    <div class="step-indicator journey-steps" aria-label="Run preparation steps">
-                        <button class="step active" data-journey-step="1" type="button"><b>1</b><span>Input</span></button><i></i>
-                        <button class="step" data-journey-step="2" type="button" disabled><b>2</b><span>Validate</span></button><i></i>
-                        <button class="step" data-journey-step="3" type="button" disabled><b>3</b><span>Folders</span></button><i></i>
-                        <button class="step" data-journey-step="4" type="button" disabled><b>4</b><span>Destination</span></button><i></i>
-                        <button class="step" data-journey-step="5" type="button" disabled><b>5</b><span>Start</span></button>
+                <div class="journey-sticky-header">
+                    <div class="intro-block new-run-intro">
+                        <div><p class="eyebrow">NEW RUN JOURNEY</p><h2 id="journey-title">Choose your input</h2><p id="journey-subtitle">Start with a completed CSV or Excel file, or create a new template.</p></div>
+                    </div>
+                    <div class="journey-nav" id="journey-nav">
+                        <div class="step-indicator journey-steps" aria-label="Run preparation steps">
+                            <button class="step active" data-journey-step="1" type="button"><b>1</b><span>Input</span></button><i></i>
+                            <button class="step" data-journey-step="2" type="button" disabled><b>2</b><span>Validate</span></button><i></i>
+                            <button class="step" data-journey-step="3" type="button" disabled><b>3</b><span>Folders</span></button>
+                        </div>
+                        <div class="journey-nav-tools"><button class="btn btn-danger-ghost btn-small" id="btn-start-over" type="button" hidden>Start over</button><div class="journey-nav-action" id="journey-nav-action"></div></div>
                     </div>
                 </div>
                 <div class="journey-lock-message" id="journey-lock-message" hidden role="status"></div>
 
                 <div class="journey-panel active" data-journey-panel="1">
                     <article class="workflow-card journey-card input-card">
-                        <div class="card-heading"><span class="card-index">01</span><div><h3>Choose your input</h3><p>Use a completed file or create a template to fill in.</p></div></div>
-                        <div class="template-actions"><div><strong>Starting from scratch?</strong><span>Create the Excel template, fill it in, then save and close it.</span></div><button class="btn btn-secondary" id="btn-download-template" type="button">Create template</button></div>
-                        <div class="choice-divider" aria-hidden="true"><span>OR</span></div>
-                        <div class="dropzone" id="dropzone"><div class="dropzone-icon">↑</div><h3>Drop your completed file here</h3><p>Excel or CSV · the original file is preserved</p><button class="btn btn-primary" id="btn-browse" type="button">Choose input file</button><input type="file" id="file-input" accept=".xlsx,.xls,.xlsm,.csv" hidden></div>
-                        <div class="file-details" id="file-details" hidden><div class="selected-file"><span class="file-type">CSV</span><div><strong id="selected-filename">—</strong><small id="selected-filesize">—</small></div><button class="btn btn-secondary btn-small" id="btn-open-selected-input" type="button">Open</button><button class="icon-btn" id="btn-clear-file" type="button" aria-label="Remove selected file">×</button></div><div class="file-state" id="file-state" hidden><span class="status-dot unauthenticated" id="file-state-dot"></span><span id="file-state-text">Checking file…</span></div><div class="mapping-notice" id="mapping-notice" hidden><div><strong id="mapping-notice-title">This file does not have the standard columns.</strong><span id="mapping-notice-text">The PO and supplier columns were not detected. Map them to continue.</span></div><button class="btn btn-secondary btn-small" id="btn-map-columns" type="button">Map columns</button></div></div>
-                        <div class="journey-footer"><span class="journey-hint">The next step checks that all required columns are present.</span><button class="btn btn-primary btn-large" id="btn-next-input" type="button" disabled>Continue to validation</button></div>
+                        <div class="card-heading"><span class="card-index">01</span><div><h3>Choose your input source</h3><p>Choose where the list of purchase orders should come from. Power BI is the recommended option; Excel remains available for specific cases.</p></div></div>
+                        <div class="input-method-picker" id="input-method-picker">
+                            <p class="input-method-kicker">STEP 1 · CHOOSE A SOURCE</p>
+                            <div class="input-method-options">
+                                <button class="input-method-choice input-method-choice-primary" data-input-method="powerbi" type="button" aria-pressed="false">
+                                    <span class="input-method-badge">RECOMMENDED</span><strong>Get POs from Power BI</strong><span>Filter the official dataset and review the POs before downloading documents.</span>
+                                </button>
+                                <button class="input-method-choice" data-input-method="excel" type="button" aria-pressed="false">
+                                    <span class="input-method-badge">FALLBACK</span><strong>Use an Excel input</strong><span>Create a template or choose a completed Excel/CSV file for a specific use case.</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="powerbi-input-method-panel" class="input-method-panel" hidden>
+                            <article class="powerbi-run-source-card powerbi-run-source-card-primary">
+                                <div class="card-heading"><span class="card-index">PB</span><div><h3>Power BI PO Mass Download Dataset</h3><p>Choose filters, fetch the matching POs, review the list, then continue to validation.</p></div></div>
+                            <div id="new-run-powerbi-source-area"></div>
+                            </article>
+                        </div>
+                        <div id="excel-input-method-panel" class="input-method-panel" hidden>
+                            <div class="template-actions"><div><strong>Starting from scratch?</strong><span>Create the Excel template, fill it in, then save and close it.</span></div><button class="btn btn-secondary" id="btn-download-template" type="button">Create template</button></div>
+                            <div class="choice-divider" aria-hidden="true"><span>OR</span></div>
+                            <div class="dropzone" id="dropzone"><div class="dropzone-icon">↑</div><h3>Drop your completed file here</h3><p>Excel or CSV · the original file is preserved</p><button class="btn btn-primary" id="btn-browse" type="button">Choose input file</button><input type="file" id="file-input" accept=".xlsx,.xls,.xlsm,.csv" hidden></div>
+                            <div class="file-details" id="file-details" hidden><div class="selected-file"><span class="file-type">CSV</span><div><strong id="selected-filename">—</strong><small id="selected-filesize">—</small></div><button class="btn btn-secondary btn-small" id="btn-open-selected-input" type="button">Open</button><button class="icon-btn" id="btn-clear-file" type="button" aria-label="Remove selected file">×</button></div><div class="file-state" id="file-state" hidden><span class="status-dot unauthenticated" id="file-state-dot"></span><span id="file-state-text">Checking file…</span></div><div class="mapping-notice" id="mapping-notice" hidden><div><strong id="mapping-notice-title">This file does not have the standard columns.</strong><span id="mapping-notice-text">The PO and supplier columns were not detected. Map them to continue.</span></div><button class="btn btn-secondary btn-small" id="btn-map-columns" type="button">Map columns</button></div></div>
+                        </div>
+                        <div class="journey-footer" id="input-method-footer" hidden><span class="journey-hint" id="input-method-hint">Choose a source to continue.</span><button class="btn btn-primary btn-large" id="btn-next-input" type="button" disabled hidden>Continue to validation</button></div>
                     </article>
                 </div>
 
@@ -78,45 +104,251 @@
                         </div>
                         <div class="validation-feedback" id="validation-feedback" hidden></div>
                         <button class="btn btn-secondary btn-block" id="btn-validate-file" type="button">Validate input</button>
-                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="1" type="button">Back</button><button class="btn btn-primary btn-large" id="btn-next-hierarchy" type="button" disabled>Continue to folders</button></div>
+                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="1" type="button">Back</button><button class="btn btn-primary btn-large" id="btn-next-hierarchy" type="button" disabled hidden>Continue to folders</button></div>
                     </article>
                 </div>
 
                 <div class="journey-panel" data-journey-panel="3" hidden>
                     <article class="workflow-card journey-card narrow-card">
-                        <div class="card-heading"><span class="card-index">03</span><div><h3>Arrange folder hierarchy</h3><p>Supplier is always the first level and the PO is the last. Drag the levels in between to reorder them.</p></div></div>
+                        <div class="card-heading"><span class="card-index">03</span><div><h3>Choose the save location and confirm folders</h3><p>Choose where this run will be saved, then review and approve the final folder structure before starting.</p></div></div>
+                        <div class="destination-inline"><div class="card-heading destination-heading"><span class="card-index">03a</span><div><h3>Choose the save location</h3><p>Confirm the pre-filled parent folder, or choose another one.</p></div></div><label class="field-label" for="download-dir">Download folder</label><div class="input-with-action"><input id="download-dir" type="text" placeholder="Choose a folder" autocomplete="off"><button class="btn btn-secondary" id="btn-choose-dir" type="button">Choose folder</button></div><div class="destination-note"><span>i</span><span>Existing valid files are preserved during retries.</span></div><div class="destination-feedback" id="destination-feedback" hidden role="alert"></div></div>
                         <div class="folder-guide journey-folder-guide">
                             <div class="folder-hierarchy" id="folder-hierarchy"><div class="hierarchy-empty">Validate the input to load its folder levels.</div></div>
                             <p class="sr-only" id="hierarchy-reorder-status" aria-live="polite"></p>
                             <div class="hierarchy-disabled" id="hierarchy-disabled" hidden><h4>Disabled columns</h4><p>These columns stay in the input and in the final report, but do not create folders.</p><ul id="hierarchy-disabled-list"></ul></div>
                             <div class="hierarchy-warnings" id="hierarchy-warnings" hidden></div>
+                            <div class="hierarchy-path-safety" id="hierarchy-path-safety" hidden role="status"></div>
                             <small>Columns after <code>&lt;|&gt;</code> become folders. Empty values become <code>Unknown</code>. Columns without any value are ignored.</small>
                         </div>
-                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="2" type="button">Back</button><button class="btn btn-primary btn-large" id="btn-next-destination" type="button">Continue to destination</button></div>
-                    </article>
-                </div>
-
-                <div class="journey-panel" data-journey-panel="4" hidden>
-                    <article class="workflow-card journey-card narrow-card">
-                        <div class="card-heading"><span class="card-index">04</span><div><h3>Confirm the folder structure</h3><p>This is how downloaded files will be organized. Confirm it, then choose the save location.</p></div></div>
-                        <div class="folder-preview-block"><pre class="folder-preview" id="destination-preview"></pre></div>
-                        <div class="card-heading destination-heading"><span class="card-index">04b</span><div><h3>Choose the save location</h3><p>Select the parent folder where this run should store its attachments.</p></div></div>
-                        <label class="field-label" for="download-dir">Download folder</label><div class="input-with-action"><input id="download-dir" type="text" placeholder="Choose a folder" autocomplete="off"><button class="btn btn-secondary" id="btn-choose-dir" type="button">Choose folder</button></div>
-                        <div class="destination-note"><span>i</span><span>Existing valid files are preserved during retries.</span></div>
-                        <div class="destination-feedback" id="destination-feedback" hidden role="alert"></div>
-                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="3" type="button">Back</button><button class="btn btn-primary btn-large" id="btn-next-review" type="button" disabled>Review run</button></div>
-                    </article>
-                </div>
-
-                <div class="journey-panel" data-journey-panel="5" hidden>
-                    <article class="workflow-card journey-card narrow-card review-card">
-                        <div class="card-heading"><span class="card-index">05</span><div><h3>Review and start</h3><p>Everything is ready. Confirm these settings to begin the download.</p></div></div>
-                        <div class="review-list"><div><span>Input file</span><strong id="review-file">—</strong></div><div><span>Folder hierarchy</span><strong id="review-hierarchy">—</strong></div><div><span>Save location</span><strong id="review-destination">—</strong><small class="review-destination-hierarchy" id="review-destination-hierarchy"></small></div></div>
-                        <div class="ready-panel"><span class="status-dot unauthenticated" id="ready-indicator"></span><div><strong id="ready-title">Ready to start</strong><small id="ready-detail">The run will be created after confirmation.</small></div></div>
-                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="4" type="button">Back</button><button class="btn btn-danger-ghost" id="btn-start-over" type="button">Start over</button><button class="btn btn-primary btn-large" id="btn-start-run" type="button">Start download</button></div>
+                        <div class="folder-preview-block"><div class="folder-preview-heading"><strong id="folder-preview-title">Final folder structure</strong><span id="folder-preview-description">This is the folder tree that will be created.</span></div><pre class="folder-preview" id="destination-preview"></pre><label class="folder-approval"><input id="folder-approval" type="checkbox"><span id="folder-approval-label">I approve this final folder structure and save location.</span></label></div>
+                        <div class="journey-footer"><button class="btn btn-quiet" data-journey-back="2" type="button">Back</button><button class="btn btn-primary btn-large" id="btn-start-run" type="button" disabled hidden>Start download</button></div>
                     </article>
                 </div>
                 <div class="active-run-banner" id="active-run-banner" hidden><div><strong>A download is already running.</strong><span>Return to Active run to monitor it.</span></div><button class="btn btn-secondary" id="btn-go-active-run" type="button">View active run</button></div>
+            </section>
+
+            <section class="screen" id="screen-lab" hidden>
+                <div class="intro-block lab-intro-block">
+                    <div><p class="eyebrow">EXPERIMENTAL ANALYSIS</p><h2>LAB</h2><p>Select POs in the source workspace, then inspect the connected GRIR and FX reconciliations. Timesheet Review remains an independent workstream for now.</p></div>
+                    <div class="lab-state-note"><span class="status-dot online"></span><span>PO selection feeds GRIR and FX</span></div>
+                </div>
+                <nav class="lab-subnav" aria-label="LAB analysis navigation" role="tablist">
+                    <button class="lab-subtab active" id="lab-tab-overview" data-lab-subtab="overview" type="button" role="tab" aria-selected="true">Overview</button>
+                    <button class="lab-subtab" id="lab-tab-source" data-lab-subtab="source" type="button" role="tab" aria-selected="false">PO Source &amp; Selection</button>
+                    <button class="lab-subtab" id="lab-tab-relationships" data-lab-subtab="relationships" type="button" role="tab" aria-selected="false">Relationship Explorer</button>
+                    <button class="lab-subtab" id="lab-tab-grir" data-lab-subtab="grir" type="button" role="tab" aria-selected="false">GRIR Reconciliation</button>
+                    <button class="lab-subtab" id="lab-tab-fx" data-lab-subtab="fx" type="button" role="tab" aria-selected="false">FX Reconciliation</button>
+                    <button class="lab-subtab" id="lab-tab-timesheet" data-lab-subtab="timesheet" type="button" role="tab" aria-selected="false">Timesheet Review</button>
+                </nav>
+                <div class="lab-panel" id="lab-panel-overview" data-lab-panel="overview" role="tabpanel">
+                    <article class="lab-onboarding">
+                        <div class="lab-story-kicker">WELCOME TO THE LAB</div>
+                        <div class="lab-story-body">
+                            <h3>A guided workspace for turning purchase-order evidence into explainable exceptions.</h3>
+                            <p>The LAB is organized as focused analysis projects. Start by defining the PO population, then use the relationship, GRIR and FX projects to understand what happened. Timesheet Review is an independent workstream.</p>
+                            <div class="lab-flow" aria-label="LAB onboarding path">
+                                <span class="lab-flow-step"><b>01</b><strong>Define scope</strong><small>Supplier · MU · Year</small></span>
+                                <i aria-hidden="true">→</i>
+                                <span class="lab-flow-step"><b>02</b><strong>Build evidence</strong><small>PO population</small></span>
+                                <i aria-hidden="true">→</i>
+                                <span class="lab-flow-step"><b>03</b><strong>Explain gaps</strong><small>Relations · GRIR · FX</small></span>
+                            </div>
+                            <div class="lab-source-strip"><span>Shared context</span><span class="lab-source-badge">PO semantic model</span><span class="lab-source-badge">Invoice dataset</span><span class="lab-source-badge lab-source-badge-muted">Timesheet workbook</span></div>
+                        </div>
+                    </article>
+                    <section class="lab-projects" aria-labelledby="lab-projects-title">
+                        <div class="lab-section-heading"><div><p class="lab-panel-eyebrow">LAB PROJECTS</p><h3 id="lab-projects-title">Choose a project to begin</h3><p>Each project starts with a short explanation of its objective, approach and method.</p></div><span class="lab-source-badge">PO selection feeds GRIR and FX</span></div>
+                        <div class="lab-project-grid">
+                            <button class="lab-project-card" data-lab-subtab="source" type="button"><span class="lab-project-number">01</span><span class="lab-project-copy"><strong>PO Source &amp; Selection</strong><span>Define the evidence population that powers the connected analyses.</span></span><span class="lab-project-cta">Open project →</span></button>
+                            <button class="lab-project-card" data-lab-subtab="relationships" type="button"><span class="lab-project-number">02</span><span class="lab-project-copy"><strong>Relationship Explorer</strong><span>Trace the contract → PO → invoice chain and find broken links.</span></span><span class="lab-project-cta">Open project →</span></button>
+                            <button class="lab-project-card" data-lab-subtab="grir" type="button"><span class="lab-project-number">03</span><span class="lab-project-copy"><strong>GRIR Reconciliation</strong><span>Compare received work with invoiced value to surface operational gaps.</span></span><span class="lab-project-cta">Open project →</span></button>
+                            <button class="lab-project-card" data-lab-subtab="fx" type="button"><span class="lab-project-number">04</span><span class="lab-project-copy"><strong>FX Reconciliation</strong><span>Separate exchange-rate impact from the underlying billing difference.</span></span><span class="lab-project-cta">Open project →</span></button>
+                            <button class="lab-project-card" data-lab-subtab="timesheet" type="button"><span class="lab-project-number">05</span><span class="lab-project-copy"><strong>Timesheet Review</strong><span>Inspect reported work coverage as a separate evidence workstream.</span></span><span class="lab-project-cta">Open project →</span></button>
+                        </div>
+                    </section>
+                    <div class="lab-reading-note"><strong>Recommended sequence</strong><span>Open PO Source &amp; Selection to define the population. GRIR and FX use the POs selected there; Timesheet Review remains independent for now.</span></div>
+                </div>
+                <div class="lab-panel" id="lab-panel-source" data-lab-panel="source" role="tabpanel" hidden>
+                    <div class="lab-panel-intro">
+                        <div class="lab-panel-index">01</div>
+                        <div><p class="lab-panel-eyebrow">DEFINE THE EVIDENCE SET</p><h3>Choose the population before reading the variances.</h3><p>Search and add supplier UU groups, choose the independent Management Unit path and year, then preview the PO population.</p><div class="lab-project-brief" aria-label="PO Source and Selection project context"><div><span>Objective</span><strong>Build a trusted PO population.</strong></div><div><span>Approach</span><strong>Filter, preview and remove outliers.</strong></div><div><span>Method</span><strong>Power BI semantic model.</strong></div></div></div>
+                        <span class="lab-source-badge">Power BI · PO dataset</span>
+                    </div>
+                    <div id="lab-powerbi-source-host" class="lab-powerbi-source-host"></div>
+                    <div class="lab-reading-note"><strong>What happens next</strong><span>The PO preview becomes the shared input for the Relationship Explorer, GRIR and FX panels. Excluding a PO here removes it from those analyses.</span></div>
+                </div>
+                <div class="lab-panel" id="lab-panel-relationships" data-lab-panel="relationships" role="tabpanel" hidden>
+                    <div class="lab-panel-intro">
+                        <div class="lab-panel-index">02</div>
+                        <div><p class="lab-panel-eyebrow">CHECK THE RELATIONAL CHAIN</p><h3>Does each PO belong to one contract, and each invoice to one PO?</h3><p>This view combines the selected Coupa run with the Power BI PO and Invoice datasets as contract → PO → invoice.</p><div class="lab-project-brief" aria-label="Relationship Explorer project context"><div><span>Objective</span><strong>Verify the contract-to-invoice chain.</strong></div><div><span>Approach</span><strong>Trace keys and flag orphan records.</strong></div><div><span>Method</span><strong>Read-only relationship inventory.</strong></div></div></div>
+                        <span class="lab-source-badge">Coupa evidence + Power BI PO/Invoice</span>
+                    </div>
+                    <article class="lab-relationship-card">
+                        <div class="lab-relationship-toolbar">
+                            <label class="lab-relationship-session"><span>Run / session</span><select id="lab-relationship-session-select"><option value="">Loading runs…</option></select></label>
+                            <div class="lab-relationship-actions"><button class="btn btn-secondary btn-small" id="btn-lab-relationship-refresh" type="button">Refresh</button><button class="btn btn-quiet btn-small" id="btn-lab-relationship-expand" type="button">Expand all</button><button class="btn btn-quiet btn-small" id="btn-lab-relationship-collapse" type="button">Collapse all</button></div>
+                        </div>
+                        <div class="lab-relationship-status" id="lab-relationship-status" role="status"><span class="status-dot authenticating"></span><span>Loading relationship inventory…</span></div>
+                        <div class="lab-relationship-metrics"><div><span>SOW candidates</span><strong id="lab-rel-sows">—</strong></div><div><span>POs</span><strong id="lab-rel-pos">—</strong></div><div><span>Invoices</span><strong id="lab-rel-invoices">—</strong></div><div><span>Warnings</span><strong id="lab-rel-warnings">—</strong></div></div>
+                        <div class="lab-relationship-worksheet"><div class="lab-relationship-sheetbar"><span class="lab-relationship-sheetname">Relationship inventory</span><span class="lab-relationship-sheetmeta">Read-only experimental view</span></div><div class="lab-relationship-table-wrap"><table class="lab-relationship-table"><thead><tr><th class="lab-relationship-row-number">#</th><th>Relationship</th><th>Type</th><th>Status</th><th>Children</th><th>Evidence</th></tr></thead><tbody id="lab-relationship-rows"><tr><td colspan="6" class="empty-state">No relationship inventory loaded.</td></tr></tbody></table></div></div>
+                    </article>
+                    <article class="lab-relationship-validation"><div class="section-header"><div><h3>Validation findings</h3><p>Warnings and errors are based on the keys available in the local capture. Filename-derived keys need confirmation.</p></div></div><div id="lab-relationship-findings" class="lab-relationship-findings"><div class="empty-state">No validation findings.</div></div></article>
+                    <div class="lab-reading-note lab-reading-note-warning"><strong>Prototype boundary</strong><span>The contract key uses the SOW number when available, otherwise the SHA-256 of the downloaded SOW document. The current SQLite schema has PO and attachment records; commitment and invoice details come from the Power BI PO and Invoice datasets.</span></div>
+                </div>
+                <div class="lab-panel" id="lab-panel-grir" data-lab-panel="grir" role="tabpanel" hidden>
+                    <div class="lab-panel-intro">
+                        <div class="lab-panel-index">03</div>
+                        <div><p class="lab-panel-eyebrow">RECONCILE RECEIPTS AND BILLING</p><h3>Is the work received fully represented by invoices?</h3><p>GRIR compares Goods Received with Invoice Received for the selected POs. Invoice date does not narrow this comparison.</p><div class="lab-project-brief" aria-label="GRIR Reconciliation project context"><div><span>Objective</span><strong>Find received value not yet invoiced.</strong></div><div><span>Approach</span><strong>Compare receipt and invoice totals.</strong></div><div><span>Method</span><strong>Goods Received − Invoice Received.</strong></div></div></div>
+                        <span class="lab-source-badge">PO + Invoice datasets</span>
+                    </div>
+                    <div class="lab-method-grid" aria-label="GRIR method"><div><span>Goods Received</span><strong>PO dataset</strong></div><div class="lab-method-arrow" aria-hidden="true">−</div><div><span>Invoice Received</span><strong>Invoice dataset</strong></div><div class="lab-method-arrow" aria-hidden="true">=</div><div><span>GRIR variance</span><strong>Exception signal</strong></div></div>
+                    <div class="lab-reading-note"><strong>How to read it</strong><span>Positive variance means Goods Received is higher than Invoice Received; negative variance means the opposite.</span></div>
+                </div>
+                <div class="lab-panel" id="lab-panel-fx" data-lab-panel="fx" role="tabpanel" hidden>
+                    <div class="lab-panel-intro">
+                        <div class="lab-panel-index">04</div>
+                        <div><p class="lab-panel-eyebrow">SEPARATE FX FROM OPERATIONAL GAP</p><h3>Is the difference caused by exchange rates or by missing billing?</h3><p>FX compares the effective invoice rate with the PO baseline. The SOW rate is a future enrichment from Coupa documents.</p><div class="lab-project-brief" aria-label="FX Reconciliation project context"><div><span>Objective</span><strong>Isolate currency-driven variance.</strong></div><div><span>Approach</span><strong>Revalue invoice amounts against PO rates.</strong></div><div><span>Method</span><strong>Invoice FX versus PO baseline.</strong></div></div></div>
+                        <span class="lab-source-badge">PO + Invoice datasets</span>
+                    </div>
+                    <div class="lab-method-grid" aria-label="FX method"><div><span>Invoice amount</span><strong>× invoice FX</strong></div><div class="lab-method-arrow" aria-hidden="true">→</div><div><span>PO baseline</span><strong>Revalued comparison</strong></div><div class="lab-method-arrow" aria-hidden="true">→</div><div><span>FX impact</span><strong>Currency signal</strong></div></div>
+                    <div class="lab-reading-note"><strong>How to read it</strong><span>FX impact explains the currency component; GRIR excluding FX shows the remaining operational difference.</span></div>
+                </div>
+                <div class="lab-panel" id="lab-panel-timesheet" data-lab-panel="timesheet" role="tabpanel" hidden>
+                    <div class="lab-panel-intro">
+                        <div class="lab-panel-index">05</div>
+                        <div><p class="lab-panel-eyebrow">SEPARATE WORKSTREAM</p><h3>Timesheets are evidence of reported work, not yet linked billing.</h3><p>Review T&amp;M coverage, reported days and fees. Fixed Price contracts do not require timesheets.</p><div class="lab-project-brief" aria-label="Timesheet Review project context"><div><span>Objective</span><strong>Assess reported work coverage.</strong></div><div><span>Approach</span><strong>Review days, resources and fees.</strong></div><div><span>Method</span><strong>Local workbook evidence.</strong></div></div></div>
+                        <span class="lab-source-badge lab-source-badge-muted">Local workbook</span>
+                    </div>
+                    <div class="lab-reading-note lab-reading-note-warning"><strong>Integration status</strong><span>The workbook currently has PWO, resource, days and fees but no confirmed PWO → PO → invoice key. Reconciliation is intentionally pending.</span></div>
+                </div>
+            </section>
+
+            <section class="screen" id="screen-powerbi" hidden>
+                <div class="powerbi-toolbar">
+                    <button class="powerbi-connection-status" id="powerbi-connection-status" type="button" disabled aria-live="polite"><span class="status-dot authenticating"></span><span>Checking Power BI session…</span></button>
+                    <button class="btn btn-secondary" id="btn-powerbi-validate" type="button">Validate cached suppliers</button>
+                    <span class="powerbi-status-message" id="powerbi-status-message">Priority suppliers are available from the local cache.</span>
+                </div>
+
+                <div class="powerbi-filter-bar" aria-label="Power BI filters">
+                    <details class="powerbi-filter-dropdown" id="powerbi-supplier-filter">
+                        <summary><span class="powerbi-filter-title">Suppliers</span><strong id="powerbi-supplier-filter-label">Select suppliers</strong><span class="powerbi-filter-chevron">⌄</span></summary>
+                        <div class="powerbi-filter-panel">
+                            <div class="powerbi-filter-panel-heading"><div><strong>Power BI supplier search</strong><small>Search any supplier, UU, GU or SAP code in the complete Power BI hierarchy.</small></div><span id="powerbi-selected-count" class="powerbi-filter-count">0 selected</span></div>
+                            <div class="powerbi-search-row"><input id="powerbi-supplier-search" type="search" placeholder="Search supplier name, UU, GU or SAP code" autocomplete="off"><button class="btn btn-primary btn-small" id="btn-powerbi-search" type="button">Search</button></div>
+                            <div class="powerbi-filter-list" id="powerbi-supplier-results"><div class="empty-state">Loading local supplier cache…</div></div>
+                            <div class="powerbi-filter-actions"><button class="btn btn-primary btn-small" id="btn-powerbi-add-suppliers" type="button" disabled>Add selected suppliers</button><button class="btn btn-secondary btn-small" id="btn-open-ngsi-settings" type="button">Manage saved suppliers</button></div>
+                        </div>
+                    </details>
+
+                    <details class="powerbi-filter-dropdown" id="powerbi-management-unit-filter">
+                        <summary><span class="powerbi-filter-title">MU Hierarchy</span><strong id="powerbi-management-unit-filter-label">All Management Units</strong><span class="powerbi-filter-chevron">⌄</span></summary>
+                        <div class="powerbi-filter-panel powerbi-filter-panel-wide">
+                            <div class="powerbi-filter-panel-heading"><div><strong>Management Unit hierarchy</strong><small>Select any level or path.</small></div><div class="powerbi-hierarchy-actions"><span class="powerbi-count" id="powerbi-hierarchy-count">Not loaded</span><button class="powerbi-refresh-button" id="btn-powerbi-refresh-hierarchy" type="button" title="Management Unit has not been refreshed yet" aria-label="Refresh Management Unit"><span class="powerbi-refresh-glyph" aria-hidden="true">↻</span><span class="sr-only">Refresh Management Unit</span></button></div></div>
+                            <div class="powerbi-hierarchy-updated" id="powerbi-hierarchy-updated">Management Unit has not been refreshed yet.</div>
+                            <div class="powerbi-hierarchy" id="powerbi-hierarchy"><div class="hierarchy-empty">No cached Management Unit hierarchy. Click refresh to load it from Power BI.</div></div>
+                        </div>
+                    </details>
+
+                    <details class="powerbi-filter-dropdown" id="powerbi-family-filter">
+                        <summary><span class="powerbi-filter-title">Purchase Family</span><strong id="powerbi-family-filter-label">All families</strong><span class="powerbi-filter-chevron">⌄</span></summary>
+                        <div class="powerbi-filter-panel powerbi-filter-panel-wide">
+                            <div class="powerbi-filter-panel-heading"><div><strong>Purchase family hierarchy</strong><small>Select any level or family.</small><small id="powerbi-family-column-label">L1 Procurement Team → L2 Purchase Family</small></div><div class="powerbi-hierarchy-actions"><span class="powerbi-count" id="powerbi-family-count">Not loaded</span><button class="powerbi-refresh-button" id="btn-powerbi-refresh-families" type="button" title="Refresh purchase families from Power BI" aria-label="Refresh purchase families from Power BI"><span class="powerbi-refresh-glyph" aria-hidden="true">↻</span><span class="sr-only">Refresh purchase families from Power BI</span></button></div></div>
+                            <div class="powerbi-hierarchy-updated" id="powerbi-family-updated">No refresh yet.</div>
+                            <div class="powerbi-search-row"><input id="powerbi-family-search" type="search" placeholder="Filter L1 or L2" autocomplete="off"></div>
+                            <div class="powerbi-hierarchy" id="powerbi-family-results"><div class="hierarchy-empty">Loading purchase families…</div></div>
+                        </div>
+                    </details>
+
+                    <details class="powerbi-filter-dropdown" id="powerbi-date-filter">
+                        <summary><span class="powerbi-filter-title">Dates</span><strong id="powerbi-date-filter-label">All PO Creation Dates</strong><span class="powerbi-filter-chevron">⌄</span></summary>
+                        <div class="powerbi-filter-panel powerbi-filter-panel-wide">
+                            <div class="powerbi-filter-panel-heading"><div><strong>PO Creation Date hierarchy</strong><small>Select a year, quarter or month.</small></div><div class="powerbi-hierarchy-actions"><span class="powerbi-count" id="powerbi-date-count">Not loaded</span><button class="powerbi-refresh-button" id="btn-powerbi-refresh-date-range" type="button" title="Refresh PO creation dates" aria-label="Refresh PO creation dates"><span class="powerbi-refresh-glyph" aria-hidden="true">↻</span><span class="sr-only">Refresh PO creation dates</span></button></div></div>
+                            <div class="powerbi-hierarchy-updated" id="powerbi-date-updated">Dates have not been refreshed yet.</div>
+                            <div class="powerbi-hierarchy" id="powerbi-date-hierarchy"><div class="hierarchy-empty">Loading available dates…</div></div>
+                        </div>
+                    </details>
+                </div>
+
+                <article class="powerbi-card powerbi-preview-card">
+                    <div class="section-header"><div><h3>Review the purchase orders</h3><p>Fetch the POs that match your filters. Remove any you do not want, then continue to validation below.</p></div><div class="powerbi-preview-actions"><button class="btn btn-primary" id="btn-powerbi-preview" type="button">Fetch Data</button><button class="btn btn-danger btn-small" id="btn-powerbi-cancel" type="button" hidden>Cancel</button><progress id="powerbi-query-progress" max="1" value="0" hidden></progress></div></div>
+                    <details class="lab-card-method"><summary>How this works</summary><div class="lab-card-method-grid powerbi-method-explanation"><div><strong>What this screen does</strong><span>It builds the list of purchase orders that will be sent to the Coupa download. You choose the suppliers, Management Units and PO creation dates above.</span></div><div><strong>Where the information comes from</strong><span>The list is created from the official <a href="https://app.powerbi.com/groups/a1a9b029-7ff7-4d8b-83c8-176681b8bcd6/reports/a8b3ff6a-7719-430f-9b55-d332fc97cea9/64ed28abf525ecc2cd5c?experience=power-bi" target="_blank" rel="noopener noreferrer">Power BI PO Mass Download Dataset report</a>.</span></div><div><strong>What you will see</strong><span>Each row represents one PO. Company Code and Legal Entity are shown so you can compare the PO’s organizational context with your Coupa access. This may flag likely 401/403 access issues before downloading, but it does not guarantee that Coupa will authorize the PO.</span></div></div></details>
+                    <details class="lab-card-method powerbi-columns-accordion" id="powerbi-columns-accordion"><summary>Available dataset columns <span id="powerbi-column-summary">—</span></summary><div class="powerbi-columns-inline"><p class="modal-description">Fields are loaded from the Power BI dataset catalog and grouped by subject. Required identity fields stay selected; expand a group to add optional fields to the preview.</p><div class="powerbi-columns-toolbar"><button class="btn btn-secondary btn-small" id="btn-select-all-powerbi-columns" type="button">Select all</button><button class="btn btn-quiet btn-small" id="btn-clear-powerbi-columns" type="button">Clear optional</button><button class="btn btn-quiet btn-small" id="btn-refresh-powerbi-columns" type="button">Refresh catalog</button><span id="powerbi-columns-count">—</span><span id="powerbi-columns-updated">Catalog has not been refreshed yet.</span></div><div class="powerbi-column-options" id="powerbi-column-options"><div class="empty-state">Expand this section to load dataset fields…</div></div><div class="powerbi-columns-apply"><button class="btn btn-primary btn-small" id="btn-apply-powerbi-columns" type="button">Apply columns</button></div></div></details>
+                    <details class="lab-card-method powerbi-query-details" id="powerbi-query-details" hidden><summary>View the Power BI query details</summary><div class="powerbi-query-observability"><div class="powerbi-query-toolbar"><span id="powerbi-query-status">No query has been sent yet.</span><button class="btn btn-secondary btn-small" id="btn-powerbi-copy-query-details" type="button">Copy details</button></div><div class="powerbi-query-block"><strong>Filters sent</strong><pre id="powerbi-query-filters">—</pre></div><div class="powerbi-query-block"><strong>Query details</strong><pre id="powerbi-query-dax">—</pre></div></div></details>
+                    <div class="powerbi-metrics" id="powerbi-metrics"><div><span>Unique POs</span><strong id="powerbi-unique-pos">—</strong></div><div><span>Records</span><strong id="powerbi-record-count">—</strong></div><div><span>Multiple L3</span><strong id="powerbi-multi-l3-count">—</strong></div><div><span>Displayed fields</span><strong id="powerbi-column-summary">—</strong></div></div>
+                    <div class="table-wrap powerbi-preview-wrap"><table class="powerbi-table"><thead><tr id="powerbi-po-preview-head"><th></th><th>PO</th></tr></thead><tbody id="powerbi-po-preview"><tr><td colspan="2" class="empty-state">Apply suppliers and year to preview POs.</td></tr></tbody></table></div>
+                </article>
+
+                <article class="powerbi-card powerbi-grir-card">
+                    <div class="section-header"><div><h3>GRIR analysis</h3><p>Compare the full Goods Received value against invoices found for the selected POs. Invoice dates do not restrict this analysis.</p></div><button class="btn btn-secondary" id="btn-powerbi-grir" type="button" disabled>Refresh GRIR analysis</button></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Calculation</strong><span>GRIR variance = Goods Received EUR − Invoice Received EUR.</span></div><div><strong>Variables</strong><span>Selected PO numbers, Goods Received EUR, Invoice Received EUR, invoice count and reconciliation status.</span></div><div><strong>Data source</strong><span>PO semantic model plus Invoice dataset. All invoices found for each selected PO are included, regardless of invoice date.</span></div></div></details>
+                    <div class="powerbi-grir-empty" id="powerbi-grir-empty">Fetch Data to load the GRIR comparison.</div>
+                    <div class="powerbi-grir-dashboard" id="powerbi-grir-dashboard" hidden>
+                        <div class="powerbi-grir-metrics"><div><span>POs analyzed</span><strong id="powerbi-grir-pos">—</strong></div><div><span>Goods Received EUR</span><strong id="powerbi-grir-goods">—</strong></div><div><span>Invoice Received EUR</span><strong id="powerbi-grir-invoices">—</strong></div><div><span>GRIR variance EUR</span><strong id="powerbi-grir-variance">—</strong></div><div><span>POs without invoice</span><strong id="powerbi-grir-no-invoice">—</strong></div></div>
+                        <div class="powerbi-grir-chart-grid"><div class="powerbi-grir-chart"><h4>Receipt value comparison</h4><div id="powerbi-grir-value-bars"></div></div><div class="powerbi-grir-chart"><h4>Reconciliation status</h4><div id="powerbi-grir-status-bars"></div></div></div>
+                        <div class="table-wrap powerbi-grir-table-wrap"><table class="powerbi-table"><thead><tr><th>PO</th><th>Goods Received EUR</th><th>Invoice Received EUR</th><th>Variance EUR</th><th>Invoices</th><th>Status</th></tr></thead><tbody id="powerbi-grir-rows"></tbody></table></div>
+                    </div>
+                </article>
+
+                <article class="powerbi-card powerbi-fx-card">
+                    <div class="section-header"><div><h3>FX analysis</h3><p>Compare effective invoice and PO FX rates. POs are collapsed by default; expand a PO to inspect its invoices.</p></div><button class="btn btn-secondary" id="btn-powerbi-fx" type="button" disabled>Refresh FX analysis</button></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Calculation</strong><span>FX impact = Invoice Received EUR − invoice document amount revalued at the PO FX rate. GRIR excluding FX uses that revalued invoice amount.</span></div><div><strong>Variables</strong><span>Invoice document amount, invoice reporting EUR, PO FX rate, invoice FX rate and FX delta.</span></div><div><strong>Data source</strong><span>PO semantic model plus Invoice dataset. SOW FX remains unavailable until Coupa document extraction is connected.</span></div></div></details>
+                    <div class="powerbi-fx-empty" id="powerbi-fx-empty">Fetch Data to load the FX comparison.</div>
+                    <div class="powerbi-fx-dashboard" id="powerbi-fx-dashboard" hidden>
+                        <div class="powerbi-fx-metrics"><div><span>Invoices analyzed</span><strong id="powerbi-fx-invoices">—</strong></div><div><span>GRIR total EUR</span><strong id="powerbi-fx-grir">—</strong></div><div><span>FX impact EUR</span><strong id="powerbi-fx-impact">—</strong></div><div><span>GRIR excluding FX</span><strong id="powerbi-fx-ex-grir">—</strong></div><div><span>FX variances</span><strong id="powerbi-fx-variance-count">—</strong></div><div><span>SOW FX</span><strong id="powerbi-fx-sow">Unavailable</strong></div></div>
+                        <div class="powerbi-fx-chart-grid"><div class="powerbi-fx-chart"><h4>GRIR decomposition</h4><div id="powerbi-fx-value-bars"></div></div><div class="powerbi-fx-chart"><h4>FX status</h4><div id="powerbi-fx-status-bars"></div></div></div>
+                        <div class="powerbi-fx-toolbar"><span>PO details</span><div><button class="btn btn-secondary btn-small" id="btn-powerbi-fx-expand" type="button">Expand all</button><button class="btn btn-secondary btn-small" id="btn-powerbi-fx-collapse" type="button">Collapse all</button></div></div>
+                        <div class="table-wrap powerbi-fx-table-wrap"><table class="powerbi-table"><thead><tr><th></th><th>PO / Invoice</th><th>GRIR EUR</th><th>FX impact EUR</th><th>PO FX</th><th>Invoice FX</th><th>Status</th></tr></thead><tbody id="powerbi-fx-rows"></tbody></table></div>
+                        <p class="powerbi-fx-sow-note">SOW FX is unavailable until the Coupa document extraction is connected.</p>
+                    </div>
+                </article>
+            </section>
+
+            <section class="screen" id="screen-timesheet" hidden>
+                <div class="intro-block">
+                    <div><p class="eyebrow">TIMESHEET STORY</p><h2>Timesheet Analysis</h2><p>Follow coverage, reported work, reconciliation readiness, and exceptions. Timesheets apply to Time &amp; Materials contracts; Fixed Price is not applicable.</p></div>
+                    <div class="timesheet-source-status" id="timesheet-source-status"><span class="status-dot unauthenticated"></span><span>No timesheet snapshot loaded</span></div>
+                </div>
+
+                <div class="timesheet-toolbar">
+                    <input id="timesheet-source-path" type="text" placeholder="Choose a timesheet workbook" readonly>
+                    <button class="btn btn-secondary" id="btn-timesheet-select" type="button">Choose workbook</button>
+                    <button class="btn btn-primary" id="btn-timesheet-load" type="button" disabled>Load workbook</button>
+                    <label class="timesheet-filter-field">Supplier<select id="timesheet-supplier-filter"><option value="">All suppliers</option></select></label>
+                    <label class="timesheet-filter-field">Scope<select id="timesheet-scope"><option value="tm">Time &amp; Materials</option><option value="all">All classifications</option><option value="exceptions">Exceptions</option></select></label>
+                </div>
+
+                <article class="timesheet-card timesheet-story-card">
+                    <div class="story-heading"><span class="story-step">01</span><div><h3>Coverage</h3><p>What the uploaded source contains and how much is applicable to T&amp;M.</p></div></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Method</strong><span>Classify rows as T&amp;M, Fixed Price or pending, then count unique PWOs and unmapped source rows.</span></div><div><strong>Variables</strong><span>PWO, billing type, classification, row count and source-row mapping.</span></div><div><strong>Data source</strong><span>Selected local workbook and its timesheet sheet; the default view is T&amp;M.</span></div></div></details>
+                    <div class="timesheet-metrics"><div><span>T&amp;M PWOs</span><strong id="timesheet-tm-pwo">—</strong></div><div><span>Fixed Price PWOs</span><strong id="timesheet-fixed-pwo">—</strong><small>Not applicable</small></div><div><span>Classification pending</span><strong id="timesheet-pending-classification">—</strong></div><div><span>Rows without PWO</span><strong id="timesheet-unmapped">—</strong></div></div>
+                    <div class="timesheet-source-meta"><span id="timesheet-source-name">Source not loaded</span><span id="timesheet-sheet-name">—</span><span id="timesheet-last-updated">Last updated: —</span></div>
+                </article>
+
+                <article class="timesheet-card timesheet-story-card">
+                    <div class="story-heading"><span class="story-step">02</span><div><h3>Reported work</h3><p>Aggregate work and fees reported by the selected supplier and scope.</p></div></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Calculation</strong><span>Days reported and fees are summed by filtered supplier, PWO and billing scope; resource assignments are counted.</span></div><div><strong>Variables</strong><span>Supplier, scope, Days, Fees, Resource and PWO.</span></div><div><strong>Data source</strong><span>Normalized rows from the selected local timesheet workbook.</span></div></div></details>
+                    <div class="timesheet-metrics"><div><span>Days reported</span><strong id="timesheet-days">—</strong></div><div><span>Reported fees</span><strong id="timesheet-fees">—</strong></div><div><span>Resource assignments</span><strong id="timesheet-resources">—</strong></div><div><span>Suppliers in source</span><strong id="timesheet-suppliers">—</strong></div></div>
+                </article>
+
+                <article class="timesheet-card timesheet-story-card timesheet-pending-card">
+                    <div class="story-heading"><span class="story-step">03</span><div><h3>Invoiced value</h3><p>Invoice comparison will be enabled after the PWO → PO → invoice key is confirmed.</p></div></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Calculation</strong><span>No invoice value is calculated yet; this card intentionally reports a pending state.</span></div><div><strong>Variables</strong><span>PWO, PO number and invoice identifier are required to establish the join.</span></div><div><strong>Data source</strong><span>Timesheet workbook now; Invoice dataset will be added after the PWO → PO → invoice key is confirmed.</span></div></div></details>
+                    <div class="timesheet-pending-message"><strong>Pending invoice linkage</strong><span>The current workbook provides PWO, resource, days and fees, but no reliable PO or invoice identifier. No invoice value is invented.</span></div>
+                </article>
+
+                <article class="timesheet-card timesheet-story-card timesheet-pending-card">
+                    <div class="story-heading"><span class="story-step">04</span><div><h3>Variances</h3><p>Variance calculations will compare the timesheet fees with the linked invoice amount.</p></div></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Future calculation</strong><span>Expected variance = reported timesheet fees − linked invoice amount, subject to contract billing rules.</span></div><div><strong>Variables</strong><span>Reported fees, invoice amount, currency, supplier, PWO and billing type.</span></div><div><strong>Data source</strong><span>Timesheet workbook plus Invoice dataset after the business key and currency treatment are approved.</span></div></div></details>
+                    <div class="timesheet-pending-message"><strong>Pending PWO / invoice mapping</strong><span>Once the business key is available, this section can show billed-versus-reported differences by supplier, PWO and Management Unit.</span></div>
+                </article>
+
+                <article class="timesheet-card timesheet-story-card">
+                    <div class="story-heading"><span class="story-step">05</span><div><h3>Exceptions &amp; actions</h3><p>Review the aggregated PWO view and identify items that need mapping or classification.</p></div></div>
+                    <details class="lab-card-method"><summary>Method &amp; data sources</summary><div class="lab-card-method-grid"><div><strong>Method</strong><span>Surface rows with missing PWO, Fixed Price classification or pending billing classification for follow-up.</span></div><div><strong>Variables</strong><span>Supplier, PWO, billing type, classification, period, resources, Days and Fees.</span></div><div><strong>Data source</strong><span>Aggregated rows from the selected local timesheet workbook.</span></div></div></details>
+                    <div class="timesheet-exception-summary" id="timesheet-exception-summary">Load a workbook to populate the exception view.</div>
+                    <div class="table-wrap timesheet-table-wrap"><table class="powerbi-table"><thead><tr><th>Supplier</th><th>PWO</th><th>Billing type</th><th>Status</th><th>Period</th><th>Resources</th><th>Days</th><th>Fees</th></tr></thead><tbody id="timesheet-rows"><tr><td colspan="8" class="empty-state">No timesheet snapshot loaded.</td></tr></tbody></table></div>
+                </article>
             </section>
 
             <section class="screen" id="screen-progress" hidden>
@@ -125,44 +357,63 @@
                     <div class="metric-card wide"><span>Progress</span><strong id="progress-text">0% (0/0)</strong><div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div></div>
                     <div class="metric-card"><span>Speed</span><strong id="speed-val">0.0 <small>PO/min</small></strong><small class="metric-note" id="speed-note">Recent completed POs</small></div>
                     <div class="metric-card"><span>ETA</span><strong id="eta-val">--:--</strong><small class="metric-note" id="eta-note">Updates with recent speed</small></div>
-                    <div class="metric-card"><span>Errors</span><strong class="danger-text" id="errors-val">0</strong></div>
+                    <div class="metric-card errors-metric" id="errors-metric" tabindex="0"><span>Errors</span><strong class="danger-text" id="errors-val">0</strong><div class="error-breakdown" id="error-breakdown" role="tooltip" hidden></div></div>
                 </div>
                 <div class="run-actions"><span class="run-state" id="run-state">Waiting</span><button class="btn btn-secondary" id="btn-pause-resume" type="button" disabled>Pause</button><button class="btn btn-danger" id="btn-stop-session" type="button" disabled>Stop run</button></div>
                 <article class="log-card"><div class="section-header"><div><h3>Execution log</h3><p>Key progress, authentication, warning, error, and report events.</p></div><button class="btn btn-quiet" id="btn-clear-log" type="button">Clear</button></div><div class="console-body" id="console-log"><div class="log-line system">Waiting to start…</div></div></article>
+                <article class="run-complete-card" id="run-complete-card" hidden role="status" aria-live="polite"><div class="run-complete-copy"><span class="run-complete-icon" id="run-complete-icon">✓</span><div><strong id="run-complete-title">Run completed</strong><span id="run-complete-message">The run has finished.</span></div></div><div class="run-artifact-links"><button class="btn btn-secondary btn-small" id="btn-open-complete-report" type="button">Open Excel report</button><button class="btn btn-secondary btn-small" id="btn-open-complete-folder" type="button">Open download folder</button></div></article>
             </section>
 
             <section class="screen" id="screen-history" hidden>
                 <div class="intro-block"><div><p class="eyebrow">AUDIT TRAIL</p><h2>Run history</h2><p>Review GUI results, inspect PO-level errors, and export a report. CLI pipeline runs remain separate.</p></div><div class="history-toolbar"><button class="btn btn-secondary" id="btn-refresh-history" type="button">Refresh</button><button class="btn btn-danger" id="btn-clear-history" type="button">Delete all history</button></div></div>
-                <article class="history-card"><div class="table-wrap"><table class="history-table"><thead><tr><th>Run</th><th>Input</th><th>Description</th><th>Started</th><th>POs</th><th>Result</th><th>Actions</th></tr></thead><tbody id="history-list"><tr><td colspan="7" class="empty-state">No runs yet.</td></tr></tbody></table></div></article>
+                <article class="history-card"><div class="table-wrap"><table class="history-table"><thead><tr><th><span class="history-header-label">Run</span></th><th><span class="history-header-label">Started</span> <small class="history-timezone-label" id="history-timezone-label" title="Local timezone">TZ</small></th><th><span class="history-header-label">Result</span></th><th><span class="history-header-label">Actions</span></th></tr></thead><tbody id="history-list"><tr><td colspan="4" class="empty-state">No runs yet.</td></tr></tbody></table></div></article>
             </section>
 
             <section class="screen" id="screen-learn" hidden>
                 <div class="intro-block"><div><p class="eyebrow">LEARN</p><h2>How Contract Downloader works</h2><p>A practical guide to prepare inputs, download attachments, and recover safely from errors.</p></div></div>
                 <div class="learn-grid">
                     <article class="learn-card"><span class="learn-icon">01</span><h3>Prepare the input</h3><p>Use an Excel or CSV file with <code>PO_NUMBER</code> and <code>SUPPLIER</code>. The template includes an <code>&lt;|&gt;</code> separator. Save and close Excel before validating.</p><div class="learn-note">Columns after <code>&lt;|&gt;</code> become folder levels. Blank required fields are reported before any download starts.</div></article>
-                    <article class="learn-card"><span class="learn-icon">02</span><h3>Follow the journey</h3><p>The New Run journey has five stages: input, validation, folders, destination, and review. A run is created only after the final confirmation.</p><div class="learn-note">Completed steps remain available for navigation; future steps explain what is still missing.</div></article>
-                    <article class="learn-card"><span class="learn-icon">03</span><h3>What happens during a run?</h3><p>The app uses authenticated HTTP requests to Coupa, reads PO and PR pages, discovers attachments, and saves them inside the run folder.</p><div class="learn-note">Downloads simultaneous is capped at 8, with adaptive backoff when Coupa responds with rate limits.</div></article>
+                    <article class="learn-card"><span class="learn-icon">02</span><h3>Follow the journey</h3><p>The New Run journey has three stages: input, validation, and final folder setup. A run starts only after you approve the visible folder tree.</p><div class="learn-note">Completed steps remain available for navigation; the final stage combines the save location, hierarchy, and approval.</div></article>
+                    <article class="learn-card"><span class="learn-icon">03</span><h3>What happens during a run?</h3><p>The app uses authenticated HTTP requests to Coupa, reads PO and PR pages, discovers attachments, and saves them inside the run folder.</p><div class="learn-note">The official HTTP engine uses 11 concurrent downloads with adaptive backoff when Coupa responds with rate limits.</div></article>
                     <article class="learn-card"><span class="learn-icon">04</span><h3>Errors and retries</h3><p>Open Active run for progress and logs. Automatic retries can be configured in Settings, and failed POs can also be retried manually from History.</p><div class="learn-note">A retry uses the same run folder and preserves valid existing files.</div></article>
                     <article class="learn-card"><span class="learn-icon">05</span><h3>History and reports</h3><p>Run history stores PO-level results, retry history, preserved inputs, reports, and links back to Coupa. You can delete one run or clear all history.</p><div class="learn-note">Deleting a run removes its run folder; original input files outside that folder are preserved.</div></article>
-                    <article class="learn-card"><span class="learn-icon">06</span><h3>Authentication and privacy</h3><p>Authentication uses a separate app-owned browser profile and cached session until Coupa invalidates it. External links use the operating system default browser. Update checks contact GitHub only when enabled.</p><div class="learn-note">The app does not send telemetry. Cookies, credentials, and input documents stay on the local machine.</div></article>
+                    <article class="learn-card"><span class="learn-icon">06</span><h3>Authentication and privacy</h3><p>Authentication reuses the existing Microsoft Edge work profile and secure native session storage until Coupa invalidates it. Close all Edge windows only when the app asks.</p><div class="learn-note">The app does not send telemetry. Cookies, credentials, and input documents stay on the local machine.</div></article>
                 </div>
             </section>
 
             <section class="screen" id="screen-settings" hidden>
                 <div class="intro-block"><div><p class="eyebrow">SETTINGS</p><h2>Preferences</h2><p>Control downloads, retries, updates, and how long runs remain in history.</p></div><button class="btn btn-secondary" id="btn-reset-settings" type="button">Reset defaults</button></div>
                 <article class="settings-card">
-                    <div class="settings-section"><div><h3>Language</h3><p>Changes the application interface language. CLI output and logs remain in English.</p></div><div class="settings-field"><label for="settings-language">Interface language</label><select id="settings-language"><option value="en">English (default)</option><option value="pt-BR">Português (Brasil)</option></select></div></div>
-                    <div class="settings-section"><div><h3>Text size</h3><p>Adjusts the interface scale for readability. The preview is applied immediately and saved on this computer.</p></div><div class="settings-field"><label for="settings-font-scale">Interface text size</label><select id="settings-font-scale"><option value="1">Standard — 100%</option><option value="1.1" selected>Comfortable — 110%</option><option value="1.2">Large — 120%</option><option value="1.3">Extra large — 130%</option></select></div></div>
-                    <div class="settings-section"><div><h3>Downloads</h3><p>Choose the base folder. Each run receives its own timestamped subfolder.</p></div><div class="settings-field wide-field"><label for="settings-download-root">Default download folder</label><div class="input-with-action"><input id="settings-download-root" type="text" autocomplete="off"><button class="btn btn-secondary" id="btn-settings-choose-dir" type="button">Choose</button></div></div></div>
-                    <div class="settings-section"><div><h3>Downloads simultaneous</h3><p>How many POs the app processes at the same time. Higher values may increase server load.</p></div><div class="settings-field"><label for="settings-concurrency">Speed profile</label><select id="settings-concurrency"><option value="2">Conservative — 2 downloads</option><option value="4">Balanced — 4 downloads</option><option value="6">Fast — 6 downloads</option><option value="8">Custom maximum — 8 downloads</option></select><small class="estimate-text" id="settings-concurrency-estimate">Estimate for 100 POs will be calculated from completed runs.</small></div></div>
-                    <div class="settings-section"><div><h3>Retry policy</h3><p>Automatic attempts for a PO before marking it as failed. Manual retry remains available from History.</p></div><div class="settings-field"><label for="settings-retry">Automatic retry</label><select id="settings-retry"><option value="1">No automatic retry</option><option value="2">Retry once</option><option value="3">Retry twice</option></select></div></div>
-                    <div class="settings-section"><div><h3>Email files (.msg)</h3><p>Choose whether downloaded email files are converted to PDF and whether their real attachments are extracted.</p></div><div class="settings-field"><label for="settings-msg-processing">Automatic processing</label><select id="settings-msg-processing"><option value="disabled">Disabled</option><option value="convert">Convert to PDF</option><option value="convert_extract">Convert to PDF and extract attachments</option></select></div></div>
-                    <div class="settings-section"><div><h3>Duplicate files</h3><p>Compare files with SHA-256. Identical files use a hard link when possible, or a reference sidecar when they are on different volumes.</p></div><label class="toggle-field"><input id="settings-deduplicate" type="checkbox"><span>Identify identical files</span></label></div>
-                    <div class="settings-section"><div><h3>Updates</h3><p>Startup checks are optional. You can always check, download, verify, and install an update manually.</p></div><div class="update-settings-actions"><label class="toggle-field"><input id="settings-auto-updates" type="checkbox"><span>Check automatically</span></label><button class="btn btn-secondary" id="btn-check-updates" type="button">Check now</button></div></div>
-                    <div class="settings-section" id="settings-auth-browser-section"><div><h3>Contract Downloader browser</h3><p>Choose the browser used by Contract Downloader for Coupa sign-in. External links continue to use your operating system default browser.</p></div><div class="settings-field"><label for="settings-auth-browser">Contract Downloader browser</label><select id="settings-auth-browser"><option value="auto">Automatic</option><option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div></div>
-                    <div class="settings-section"><div><h3>Coupa sign-in</h3><p>The app uses a separate persistent profile for sign-in, so personal browser windows and profiles are not changed or locked.</p></div><button class="btn btn-secondary" id="btn-reset-auth" type="button">Reset sign-in state</button></div>
-                    <div class="settings-section"><div><h3>Start clean</h3><p>Forget local run history and sign-in state while preserving downloaded files, reports, and original inputs. Close the app sign-in browser and stop any active run first.</p></div><button class="btn btn-danger" id="btn-reset-application" type="button">Reset local state</button></div>
-                    <div class="settings-section"><div><h3>History retention</h3><p>Automatic cleanup only applies to completed runs and never removes an active run.</p></div><div class="settings-field"><label for="settings-retention">Keep</label><select id="settings-retention"><option value="all">Everything</option><option value="10">Last 10 runs</option><option value="30">Last 30 runs</option><option value="90">Runs from the last 90 days</option></select></div></div>
+                    <nav class="settings-tabs" role="tablist" aria-label="Settings categories">
+                        <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="general">General</button>
+                        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="downloads">Downloads</button>
+                        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="updates">Updates</button>
+                        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="authentication">Authentication</button>
+                        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="data">Data &amp; history</button>
+                    </nav>
+                    <div class="settings-tab-panel" role="tabpanel" data-settings-panel="general">
+                        <div class="settings-section"><div><h3>Language</h3><p>Changes the application interface language. CLI output and logs remain in English.</p></div><div class="settings-field"><label for="settings-language">Interface language</label><select id="settings-language"><option value="en">English (default)</option><option value="pt-BR">Português (Brasil)</option></select></div></div>
+                        <div class="settings-section"><div><h3>Text size</h3><p>Adjusts the interface scale for readability. The preview is applied immediately and saved on this computer.</p></div><div class="settings-field"><label for="settings-font-scale">Interface text size</label><select id="settings-font-scale"><option value="1">Standard — 100%</option><option value="1.1" selected>Comfortable — 110%</option><option value="1.2">Large — 120%</option><option value="1.3">Extra large — 130%</option></select></div></div>
+                    </div>
+                    <div class="settings-tab-panel" role="tabpanel" data-settings-panel="downloads" hidden>
+                        <div class="settings-section"><div><h3>Downloads</h3><p>Choose the base folder. Each run receives its own timestamped subfolder.</p></div><div class="settings-field wide-field"><label for="settings-download-root">Default download folder</label><div class="input-with-action"><input id="settings-download-root" type="text" autocomplete="off"><button class="btn btn-secondary" id="btn-settings-choose-dir" type="button">Choose</button></div></div></div>
+                        <div class="settings-section"><div><h3>Downloads simultaneous</h3><p>How many POs the app processes at the same time. Higher values may increase server load.</p></div><div class="settings-field"><label for="settings-concurrency">Speed profile</label><select id="settings-concurrency"><option value="2">Conservative — 2 downloads</option><option value="4">Balanced — 4 downloads</option><option value="6">Fast — 6 downloads</option><option value="11">Official — 11 downloads</option></select><small class="estimate-text" id="settings-concurrency-estimate">Estimate for 100 POs will be calculated from completed runs.</small></div></div>
+                        <div class="settings-section"><div><h3>Retry policy</h3><p>Automatic attempts for a PO before marking it as failed. Manual retry remains available from History.</p></div><div class="settings-field"><label for="settings-retry">Automatic retry</label><select id="settings-retry"><option value="1">No automatic retry</option><option value="2">Retry once</option><option value="3">Retry twice</option></select></div></div>
+                        <div class="settings-section"><div><h3>Email files (.msg)</h3><p>Choose whether downloaded email files are converted to PDF and whether their real attachments are extracted.</p></div><div class="settings-field"><label for="settings-msg-processing">Automatic processing</label><select id="settings-msg-processing"><option value="disabled">Disabled</option><option value="convert">Convert to PDF</option><option value="convert_extract">Convert to PDF and extract attachments</option></select></div></div>
+                        <div class="settings-section"><div><h3>Duplicate files</h3><p>Compare files with SHA-256. Identical files use a hard link when possible, or a reference sidecar when they are on different volumes.</p></div><label class="toggle-field"><input id="settings-deduplicate" type="checkbox"><span>Identify identical files</span></label></div>
+                    </div>
+                    <div class="settings-tab-panel" role="tabpanel" data-settings-panel="updates" hidden>
+                        <div class="settings-section"><div><h3>Updates</h3><p>Startup checks are optional. You can always check, download, verify, and install an update manually.</p></div><div class="update-settings-actions"><label class="toggle-field"><input id="settings-auto-updates" type="checkbox"><span>Check automatically</span></label><button class="btn btn-secondary" id="btn-check-updates" type="button">Check now</button></div></div>
+                    </div>
+                    <div class="settings-tab-panel" role="tabpanel" data-settings-panel="authentication" hidden>
+                        <div class="settings-section" id="settings-auth-browser-section"><div><h3>Contract Downloader browser</h3><p>Choose the browser used by Contract Downloader for Coupa sign-in. External links continue to use your operating system default browser.</p></div><div class="settings-field"><label for="settings-auth-browser">Contract Downloader browser</label><select id="settings-auth-browser"><option value="auto">Automatic</option><option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div></div>
+                        <div class="settings-section"><div><h3>Coupa sign-in</h3><p>The app uses a separate persistent profile for sign-in, so personal browser windows and profiles are not changed or locked.</p></div><button class="btn btn-secondary" id="btn-reset-auth" type="button">Reset sign-in state</button></div>
+                    </div>
+                    <div class="settings-tab-panel" role="tabpanel" data-settings-panel="data" hidden>
+                        <div class="settings-section settings-section-stack"><div><h3>NGSI supplier master data</h3><p>Search all supplier hierarchy levels (SU, GU and UU), then save an alias to the associated UU group. New runs use these mappings as their local NGSI supplier cache.</p></div><div class="ngsi-settings-panel"><div class="powerbi-search-row"><input id="settings-ngsi-search" type="search" placeholder="Search supplier alias or name" autocomplete="off"><button class="btn btn-primary btn-small" id="btn-settings-ngsi-search" type="button">Search Power BI</button></div><div class="powerbi-filter-list" id="settings-ngsi-results"><div class="empty-state">Search the Power BI dataset to find a supplier group.</div></div><div class="powerbi-filter-actions"><button class="btn btn-primary btn-small" id="btn-settings-ngsi-add" type="button" disabled>Add selected mapping</button><button class="btn btn-secondary btn-small" id="btn-settings-ngsi-validate" type="button">Validate cached UUs</button></div><div class="settings-ngsi-cache" id="settings-ngsi-cache"><div class="empty-state">Loading saved supplier mappings…</div></div></div></div>
+                        <div class="settings-section"><div><h3>Start clean</h3><p>Forget local run history and sign-in state while preserving downloaded files, reports, and original inputs. Close the app sign-in browser and stop any active run first.</p></div><button class="btn btn-danger" id="btn-reset-application" type="button">Reset local state</button></div>
+                        <div class="settings-section"><div><h3>History retention</h3><p>Automatic cleanup only applies to completed runs and never removes an active run.</p></div><div class="settings-field"><label for="settings-retention">Keep</label><select id="settings-retention"><option value="all">Everything</option><option value="10">Last 10 runs</option><option value="30">Last 30 runs</option><option value="90">Runs from the last 90 days</option></select></div></div>
+                    </div>
                     <div class="settings-footer"><span id="settings-status">Changes are saved locally on this computer.</span><button class="btn btn-primary btn-large" id="btn-save-settings" type="button">Save settings</button></div>
                 </article>
             </section>
@@ -178,13 +429,13 @@
     </div>
 
     <div class="modal" id="details-modal" hidden>
-        <div class="modal-card"><div class="modal-header"><div><p class="eyebrow">RUN DETAILS</p><h3 id="modal-title">Session details</h3></div><button class="icon-btn" id="btn-close-modal" type="button">×</button></div><div class="run-description-row"><label class="field-label" for="run-description-input">Run description</label><div class="input-with-action"><input id="run-description-input" type="text" maxlength="200" placeholder="Why was this run made? For whom?" autocomplete="off"><button class="btn btn-secondary" id="btn-save-run-description" type="button">Save</button></div><small class="description-hint">Free text that appears in history to explain the purpose of this run (request, analysis, requester).</small></div><div class="modal-summary"><span>Input <strong id="modal-file">—</strong></span><span>Status <strong id="modal-status">—</strong></span><button class="btn btn-secondary btn-small" id="btn-open-input" type="button">Open input file</button></div><div class="retry-history-list" id="retry-history-list" hidden><h4>Retry history</h4><ul id="retry-history-items"></ul></div><div class="company-status-list"><h4>Supplier checks</h4><ul id="company-status-items"></ul></div><div class="po-details-list"><div class="details-toolbar"><h4>Purchase orders</h4><fieldset class="status-filter-group" id="status-filter"><legend>Show statuses</legend><label class="status-filter-option"><input type="checkbox" data-status-all checked><span>All</span></label><label class="status-filter-option"><input type="checkbox" data-status="SUCCESS" checked><span>Success</span></label><label class="status-filter-option"><input type="checkbox" data-status="ERROR" checked><span>Error</span></label><label class="status-filter-option"><input type="checkbox" data-status="PENDING" checked><span>Pending</span></label><label class="status-filter-option"><input type="checkbox" data-status="SKIPPED_VERIFICATION_REQUIRED" checked><span>Skipped</span></label></fieldset></div><div class="table-wrap"><table class="modal-pos-table"><thead><tr><th>PO</th><th>Supplier</th><th>Status</th><th class="retry-column">Retry</th><th class="message-column">Message</th></tr></thead><tbody id="modal-pos-tbody"></tbody></table></div></div><div class="modal-footer"><button class="btn btn-danger" id="btn-retry-errors" type="button">Retry failed POs</button><button class="btn btn-secondary" id="btn-export-modal-report" type="button">Export report</button></div></div>
+        <div class="modal-card"><div class="modal-header"><div><p class="eyebrow">RUN DETAILS</p><h3 id="modal-title">Session details</h3></div><div class="modal-header-actions"><button class="btn btn-danger btn-small" id="btn-delete-detail" type="button">Delete</button><button class="btn btn-danger btn-small" id="btn-retry-errors" type="button">Retry failed POs</button><button class="btn btn-secondary btn-small" id="btn-export-modal-report" type="button">Export report</button><button class="icon-btn" id="btn-close-modal" type="button">×</button></div></div><div class="run-description-row"><label class="field-label" for="run-description-input">Run description</label><input id="run-description-input" type="text" maxlength="200" placeholder="Why was this run made? For whom?" autocomplete="off"><small class="description-hint">Free text is saved automatically when you leave this field.</small></div><div class="modal-summary"><span>Input <button class="history-path-link" id="modal-input-link" type="button">—</button></span><span>Download folder <button class="history-path-link" id="modal-run-folder" type="button">—</button></span><span>Report <button class="history-path-link" id="modal-report-path" type="button">—</button></span><span>Status <strong id="modal-status">—</strong></span></div><div class="retry-history-list" id="retry-history-list" hidden><h4>Retry history</h4><ul id="retry-history-items"></ul></div><div class="company-status-list"><h4>Run summary</h4><div class="run-summary-columns"><details class="run-summary-column" id="summary-suppliers"><summary>Suppliers</summary><div class="run-summary-column-body" id="run-summary-suppliers"></div></details><details class="run-summary-column" id="summary-companies"><summary>Company codes</summary><div class="run-summary-column-body" id="run-summary-companies"></div></details></div></div><details class="po-details-list" id="po-details-section"><summary>Purchase orders</summary><div class="details-toolbar"><h4>Purchase orders</h4><fieldset class="status-filter-group" id="status-filter"><legend>Show statuses</legend><label class="status-filter-option"><input type="checkbox" data-status-all checked><span>All</span></label><label class="status-filter-option"><input type="checkbox" data-status="SUCCESS" checked><span>Success</span></label><label class="status-filter-option"><input type="checkbox" data-status="ERROR" checked><span>Error</span></label><label class="status-filter-option"><input type="checkbox" data-status="PENDING" checked><span>Pending</span></label><label class="status-filter-option"><input type="checkbox" data-status="SKIPPED_VERIFICATION_REQUIRED" checked><span>Skipped</span></label></fieldset></div><div class="table-wrap"><table class="modal-pos-table"><thead><tr><th>PO</th><th>Supplier / expected Company Code</th><th>Status</th><th class="retry-column">Retry</th><th class="message-column">Access diagnosis / message</th></tr></thead><tbody id="modal-pos-tbody"></tbody></table></div></details></div>
     </div>
     <div class="modal" id="diagnostics-modal" hidden>
         <div class="modal-card diagnostics-card"><div class="modal-header"><div><p class="eyebrow">SUPPORT TOOL</p><h3>Host diagnostics</h3><p class="modal-description">This report checks compatibility, connectivity and local permissions. It excludes passwords, cookies and PO contents.</p></div><button class="icon-btn" id="btn-close-diagnostics" type="button">×</button></div><pre class="diagnostics-report" id="diagnostics-report">Running diagnostics…</pre><div class="modal-footer"><button class="btn btn-secondary" id="btn-save-diagnostics" type="button" disabled>Save report</button><button class="btn btn-primary" id="btn-copy-diagnostics" type="button" disabled>Copy report</button></div></div>
     </div>
     <script src="vendor/sortablejs/Sortable.min.js"></script>
     <script src="hierarchy-sorter.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=auth-card-live-state-20260824"></script>
 </body>
 </html>
