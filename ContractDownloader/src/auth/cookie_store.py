@@ -60,7 +60,8 @@ class CookieStore:
             os.chmod(self.db_path.parent, 0o700)
         except OSError:
             pass
-        with sqlite3.connect(self.db_path) as conn:
+        conn = sqlite3.connect(self.db_path)
+        try:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS auth_cache (
@@ -71,6 +72,8 @@ class CookieStore:
                 """
             )
             conn.commit()
+        finally:
+            conn.close()
         try:
             os.chmod(self.db_path, 0o600)
         except OSError:
@@ -80,10 +83,13 @@ class CookieStore:
         if not self.db_path.exists():
             return None
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(self.db_path)
+            try:
                 row = conn.execute(
                     "SELECT cookies_json FROM auth_cache WHERE key = 'coupa'"
                 ).fetchone()
+            finally:
+                conn.close()
             if not row:
                 return None
             return self._normalise(json.loads(row[0]))
@@ -141,7 +147,8 @@ class CookieStore:
             temporary_path = None
 
             self._init_db()
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(self.db_path)
+            try:
                 conn.execute(
                     """
                     INSERT INTO auth_cache (key, cookies_json, updated_at)
@@ -153,6 +160,8 @@ class CookieStore:
                     (payload, int(time.time())),
                 )
                 conn.commit()
+            finally:
+                conn.close()
         except (OSError, sqlite3.Error) as exc:
             raise CookieStoreError(f"Could not persist the Coupa session: {exc}") from exc
         finally:
@@ -172,9 +181,12 @@ class CookieStore:
 
         if self.db_path.exists():
             try:
-                with sqlite3.connect(self.db_path) as conn:
+                conn = sqlite3.connect(self.db_path)
+                try:
                     conn.execute("DELETE FROM auth_cache WHERE key = 'coupa'")
                     conn.commit()
+                finally:
+                    conn.close()
                 removed.append("auth_cache")
             except sqlite3.Error as exc:
                 raise CookieStoreError(f"Could not clear authentication database: {exc}") from exc

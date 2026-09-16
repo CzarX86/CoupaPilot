@@ -96,6 +96,7 @@ def test_macos_blocking_process_check_targets_only_the_main_edge_process(monkeyp
         calls.append(command)
         return type("Result", (), {"returncode": 0, "stdout": ""})()
 
+    monkeypatch.setattr("src.auth.browser.os.name", "posix")
     monkeypatch.setattr("src.auth.browser.sys.platform", "darwin")
     monkeypatch.setattr("src.auth.browser.subprocess.run", fake_run)
 

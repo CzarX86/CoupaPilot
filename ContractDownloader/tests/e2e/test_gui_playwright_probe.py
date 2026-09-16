@@ -36,6 +36,8 @@ def test_gui_playwright_probe_mock(tmp_path: Path) -> None:
     _assert_common_report(result.report)
     assert result.report["mode"] == "mock"
     assert result.report["dom_state"]["progress_text"].startswith("0%") is False
+    assert "pause-clicked" in result.report["steps"]
+    assert "clicked-stop" in result.report["steps"]
 
     expected_screens = [
         "01_loaded.png",
@@ -73,7 +75,7 @@ def test_gui_playwright_probe_start_without_file(tmp_path: Path) -> None:
 def test_gui_playwright_probe_stop_during_execution(tmp_path: Path) -> None:
     result = run_probe(mode="mock", timeout_ms=20000, output_root=tmp_path)
 
-    # Simulate stopping during execution
-    result.report["steps"].append("clicked-stop")
+    # Stopping during execution must be exercised by the probe, not simulated
+    # in the test report after the fact.
     assert "clicked-stop" in result.report["steps"]
     assert "Stop requested. Waiting current operation to end..." in result.report["console_logs"]

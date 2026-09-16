@@ -338,9 +338,27 @@ def test_list_msedgedriver_processes_parses_pgrep_and_ps(monkeypatch):
             return SimpleNamespace(returncode=0, stdout="1\n" if command[-1] == "42" else "500\n")
         return SimpleNamespace(returncode=0, stdout="")
 
+    monkeypatch.setattr("src.auth.browser.os.name", "posix")
     monkeypatch.setattr("src.auth.browser.subprocess.run", fake_run)
 
     assert _list_msedgedriver_processes() == [(42, 1), (77, 500)]
+
+
+def test_list_msedgedriver_processes_parses_wmic_on_windows(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="Node,ParentProcessId,ProcessId\r\nhost,1,42\r\nhost,500,77\r\n",
+        )
+
+    monkeypatch.setattr("src.auth.browser.os.name", "nt")
+    monkeypatch.setattr("src.auth.browser.subprocess.run", fake_run)
+
+    assert _list_msedgedriver_processes() == [(42, 1), (77, 500)]
+    assert calls[0][:4] == ["wmic", "process", "where", "name='msedgedriver.exe'"]
 
 
 def test_edge_driver_resolver_rejects_mismatched_selenium_manager_driver(monkeypatch, tmp_path):
@@ -466,11 +484,30 @@ def test_reap_orphaned_msedgedrivers_only_kills_reparented_drivers(monkeypatch):
             raise ProcessLookupError
         killed.append((pid, sig))
 
+    monkeypatch.setattr("src.auth.browser.os.name", "posix")
     monkeypatch.setattr("src.auth.browser.subprocess.run", fake_run)
     monkeypatch.setattr("src.auth.browser.os.kill", fake_kill)
 
     assert reap_orphaned_msedgedrivers() == [4242]
     assert killed == [(4242, signal.SIGTERM)]
+
+
+def test_reap_orphaned_msedgedrivers_uses_taskkill_on_windows(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("src.auth.browser.os.name", "nt")
+    monkeypatch.setattr(
+        "src.auth.browser._list_msedgedriver_processes",
+        lambda: [(4242, 0), (7777, 500)],
+    )
+    monkeypatch.setattr("src.auth.browser.subprocess.run", fake_run)
+
+    assert reap_orphaned_msedgedrivers() == [4242]
+    assert calls == [["taskkill", "/F", "/PID", "4242"]]
 
 
 def test_edge_driver_resolver_prefers_exact_cached_driver(monkeypatch, tmp_path):

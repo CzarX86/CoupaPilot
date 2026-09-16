@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -544,10 +544,13 @@ def run_probe(
 
             def complete_journey_to_final_step():
                 """Walk the New Run journey to the final folder approval step."""
+                expect(page.locator("#btn-next-input")).to_be_enabled(timeout=timeout_ms)
+                expect(page.locator("#journey-top-action")).to_be_enabled(timeout=timeout_ms)
                 page.click("#journey-top-action")
-                page.wait_for_selector("#validation-feedback:not([hidden])")
+                expect(page.locator("#validation-feedback")).to_be_visible(timeout=timeout_ms)
+                expect(page.locator("#journey-top-action")).to_be_enabled(timeout=timeout_ms)
                 page.click("#journey-top-action")
-                page.wait_for_selector('[data-journey-panel="3"]:not([hidden])')
+                expect(page.locator('[data-journey-panel="3"]')).to_be_visible(timeout=timeout_ms)
                 page.locator("#folder-approval").check()
 
             page.locator("#file-input").set_input_files(str(sample_csv))
@@ -592,7 +595,8 @@ def run_probe(
 
             page.click("#history-list .btn-view-details")
             page.wait_for_selector("#details-modal", state="visible")
-            page.wait_for_selector("#modal-pos-tbody tr")
+            page.locator("#po-details-section > summary").click()
+            page.wait_for_selector("#modal-pos-tbody tr", state="visible")
             modal_po_rows = page.locator("#modal-pos-tbody tr").count()
             status_filter_inputs = page.locator("#status-filter input").count()
             steps.append("modal-opened")

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 
 from scripts.gui_playwright_debug import RealBridge, start_server
 
@@ -55,13 +55,14 @@ def hierarchy_page(
             page.expose_function("__pw_api_call", lambda method, args: bridge.call(method, args))
             page.add_init_script(INIT_BRIDGE_SCRIPT)
             page.goto(f"http://127.0.0.1:{server.server_port}/index.html", wait_until="domcontentloaded")
-            page.wait_for_timeout(900)
             page.locator("#file-input").set_input_files(str(input_path))
-            page.wait_for_timeout(800)
+            expect(page.locator("#btn-next-input")).to_be_enabled(timeout=20000)
+            expect(page.locator("#journey-top-action")).to_be_enabled(timeout=20000)
             page.click("#journey-top-action")
-            page.wait_for_selector("#validation-feedback:not([hidden])")
+            expect(page.locator("#validation-feedback")).to_be_visible(timeout=20000)
+            expect(page.locator("#journey-top-action")).to_be_enabled(timeout=20000)
             page.click("#journey-top-action")
-            page.wait_for_selector("#hierarchy-sortable > li[data-column]")
+            expect(page.locator("#hierarchy-sortable > li[data-column]").first).to_be_visible(timeout=20000)
             try:
                 yield page, page_errors
             finally:
@@ -103,7 +104,7 @@ def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: st
         assert movable.count() == 3
         assert page.evaluate("window.Sortable && window.Sortable.version") == "1.15.7"
 
-        drag_handle = page.locator('#hierarchy-sortable > li[data-column="Department"] .drag-handle')
+        drag_handle = page.locator('#hierarchy-sortable > li[data-column="Region"] .drag-handle')
         last_item = movable.nth(2)
         handle_box = drag_handle.bounding_box()
         last_box = last_item.bounding_box()
@@ -116,12 +117,13 @@ def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: st
         page.mouse.move(drag_x, drag_y + 8, steps=6)
         page.wait_for_selector(".hierarchy-drag-fallback")
         page.mouse.move(drag_x, last_box["y"] + last_box["height"] - 2, steps=18)
-        page.wait_for_function(
-            "document.querySelector('#hierarchy-sortable > li[data-column]').dataset.column === 'Department'"
-        )
         page.mouse.up()
+        page.wait_for_function(
+            """() => [...document.querySelectorAll('#hierarchy-sortable > li[data-column]')]
+            .map(node => node.dataset.column).join(',') === 'SUPPLIER,Department,Region'"""
+        )
 
-        assert hierarchy_dom_order(page) == ["SUPPLIER", "Region", "Department", "po"]
+        assert hierarchy_dom_order(page) == ["SUPPLIER", "Department", "Region", "po"]
         assert "drag" in page.locator("#hierarchy-reorder-status").inner_text().lower()
         assert page.locator(".hierarchy-drag-fallback, .hierarchy-ghost, .hierarchy-chosen").count() == 0
         assert not page_errors, page_errors
@@ -129,11 +131,11 @@ def test_drag_reorders_only_intermediate_levels(tmp_path: Path, browser_name: st
 
 def test_reorder_buttons_are_a_reliable_keyboard_alternative(tmp_path: Path) -> None:
     with hierarchy_page(tmp_path, "hierarchy-buttons") as (page, page_errors):
-        first = page.locator('#hierarchy-sortable > li[data-column="SUPPLIER"]')
-        first.locator('[data-move-direction="down"]').click()
+        region = page.locator('#hierarchy-sortable > li[data-column="Region"]')
+        region.locator('[data-move-direction="down"]').click()
 
-        assert hierarchy_dom_order(page) == ["Department", "SUPPLIER", "Region", "po"]
-        assert page.locator('#hierarchy-sortable > li[data-column="Department"] [data-move-direction="up"]').is_disabled()
+        assert hierarchy_dom_order(page) == ["SUPPLIER", "Department", "Region", "po"]
+        assert page.locator('#hierarchy-sortable > li[data-column="SUPPLIER"] [data-move-direction="up"]').is_disabled()
         assert page.locator('#hierarchy-sortable > li[data-column="Region"] [data-move-direction="down"]').is_disabled()
         assert not page_errors, page_errors
 
@@ -144,9 +146,10 @@ def test_hierarchy_disable_survives_revalidation(tmp_path: Path) -> None:
         assert page.locator('[data-reenable-column="Region"]').count() == 1
         page.locator('[data-journey-back="2"]').click()
         page.click("#btn-validate-file")
-        page.wait_for_timeout(250)
+        expect(page.locator("#validation-feedback")).to_be_visible(timeout=20000)
+        expect(page.locator("#journey-top-action")).to_be_enabled(timeout=20000)
         page.click("#journey-top-action")
-        page.wait_for_selector("#hierarchy-disabled:not([hidden])")
+        expect(page.locator("#hierarchy-disabled")).to_be_visible(timeout=20000)
         assert page.locator('[data-column="Region"]').count() == 0
         assert page.locator('[data-reenable-column="Region"]').count() == 1
         assert not page_errors, page_errors

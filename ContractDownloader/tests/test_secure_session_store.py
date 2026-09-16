@@ -46,6 +46,16 @@ def test_secure_store_migrates_legacy_only_after_native_save(tmp_path):
     assert store.load() == {"_coupa_session": "legacy-secret"}
 
 
+def test_cookie_store_clear_releases_sqlite_lock_before_file_removal(tmp_path):
+    legacy = CookieStore(tmp_path / "cookies.json", tmp_path / "auth_cache.db")
+    legacy.save({"_coupa_session": "legacy-secret"})
+
+    legacy.clear()
+    (tmp_path / "auth_cache.db").unlink()
+
+    assert not (tmp_path / "auth_cache.db").exists()
+
+
 def test_secure_store_never_creates_plaintext_when_native_storage_is_unavailable(tmp_path):
     legacy = CookieStore(tmp_path / "cookies.json", tmp_path / "auth_cache.db")
     store = SecureSessionStore(legacy_store=legacy, backend=None)

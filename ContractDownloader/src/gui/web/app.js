@@ -459,7 +459,7 @@ document.addEventListener("DOMContentLoaded", () => {
         proxy.id = "journey-top-action";
         proxy.classList.add("journey-nav-button");
         proxy.hidden = false;
-        proxy.disabled = Boolean(locked);
+        proxy.disabled = Boolean(locked || source.disabled);
         proxy.addEventListener("click", () => {
             if (locked || source.disabled) {
                 showJourneyPendingDialog(actionStep);
@@ -4102,8 +4102,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!target) return;
         const rows = (Array.isArray(companyStats) ? companyStats : []).filter((item) => Number(item.processed || 0) > 0);
         if (!rows.length) {
-            target.innerHTML = `<span>${appSettings.language === "pt-BR" ? "A distribuição por company code aparecerá durante o processamento." : "The company-code distribution will appear during processing."}</span>`;
-            target.hidden = false;
+            target.replaceChildren();
+            target.hidden = true;
             return;
         }
         target.innerHTML = rows.map((item) => {
