@@ -274,14 +274,33 @@ class CoupaCrawler:
                 partial_path = f"{final_path}.part"
                 received_bytes = 0
                 content_length = response.headers.get("content-length")
+
+                async def run_blocking(function, *args):
+                    """Run file I/O off the event loop and finish it on cancellation."""
+                    task = asyncio.create_task(asyncio.to_thread(function, *args))
+                    try:
+                        return await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        try:
+                            await task
+                        except Exception:
+                            pass
+                        raise
+
+                stream = None
                 try:
-                    with open(partial_path, "wb") as stream:
-                        async for chunk in response.aiter_bytes(1024 * 1024):
-                            stream.write(chunk)
-                            received_bytes += len(chunk)
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.replace(partial_path, final_path)
+                    stream = await run_blocking(open, partial_path, "wb")
+                    async for chunk in response.aiter_bytes(1024 * 1024):
+                        await run_blocking(stream.write, chunk)
+                        received_bytes += len(chunk)
+                    await run_blocking(stream.flush)
+                    file_descriptor = await run_blocking(stream.fileno)
+                    await run_blocking(os.fsync, file_descriptor)
+                finally:
+                    if stream is not None:
+                        await run_blocking(stream.close)
+                try:
+                    await run_blocking(os.replace, partial_path, final_path)
                 finally:
                     if os.path.exists(partial_path):
                         os.remove(partial_path)
